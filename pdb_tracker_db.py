@@ -319,6 +319,9 @@ def fetch_pdb_entry(pdb_id: str, with_ligands: bool = True) -> Optional[dict]:
     citation = data.get('rcsb_primary_citation', {})
     journal = citation.get('journal_abbrev', 'Unknown')
     doi = citation.get('pdbx_database_id_DOI', '')
+    pubmed_id = citation.get('pdbx_database_id_PubMed', '')
+    authors_list = citation.get('author_list', [])
+    authors_str = '; '.join([a.get('name', '') for a in authors_list[:15]]) if authors_list else ''
     
     accession = data.get('rcsb_accession_info', {})
     release_date = accession.get('initial_release_date', '')[:10]
@@ -332,6 +335,8 @@ def fetch_pdb_entry(pdb_id: str, with_ligands: bool = True) -> Optional[dict]:
         'doi': doi,
         'journal': journal,
         'journal_if': get_if(journal),
+        'pubmed_id': pubmed_id,
+        'authors': authors_str,
         'fetch_date': datetime.now().strftime('%Y-%m-%d'),
         'week_id': week_id(release_date) if release_date else None,
         'ligands': '',
@@ -369,14 +374,15 @@ def insert_structures(conn: sqlite3.Connection, entries: List[dict]):
     sql = """
     INSERT OR REPLACE INTO pdb_structures 
     (pdb_id, method, release_date, resolution, title, doi, journal, journal_if,
-     ligands, ligand_names, ligand_info, fetch_date, week_id)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ligands, ligand_names, ligand_info, pubmed_id, authors, fetch_date, week_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """
     for e in entries:
         conn.execute(sql, (
             e['pdb_id'], e['method'], e['release_date'], e.get('resolution'),
             e.get('title'), e.get('doi'), e.get('journal'), e.get('journal_if'),
             e.get('ligands', ''), e.get('ligand_names', ''), e.get('ligand_info', ''),
+            e.get('pubmed_id', ''), e.get('authors', ''),
             e['fetch_date'], e.get('week_id')
         ))
     conn.commit()
@@ -386,7 +392,8 @@ def insert_structures(conn: sqlite3.Connection, entries: List[dict]):
 def get_entries_for_range(conn: sqlite3.Connection, start: str, end: str) -> List[dict]:
     """从数据库获取指定日期范围的所有条目"""
     cursor = conn.execute("""
-        SELECT pdb_id, method, release_date, resolution, title, doi, journal, journal_if, fetch_date, week_id
+        SELECT pdb_id, method, release_date, resolution, title, doi, journal, journal_if,
+               pubmed_id, authors, fetch_date, week_id
         FROM pdb_structures
         WHERE release_date BETWEEN ? AND ?
     """, (start, end))
@@ -402,8 +409,10 @@ def get_entries_for_range(conn: sqlite3.Connection, start: str, end: str) -> Lis
             'doi': r[5],
             'journal': r[6],
             'journal_if': r[7],
-            'fetch_date': r[8],
-            'week_id': r[9]
+            'pubmed_id': r[8] or '',
+            'authors': r[9] or '',
+            'fetch_date': r[10],
+            'week_id': r[11]
         })
     return entries
 
@@ -510,6 +519,92 @@ def query_target_new_structures(conn: sqlite3.Connection, uniprot_acc: str) -> L
     return [dict(zip(cols, r)) for r in cursor.fetchall()]
 
 
+# ========== 文献元数据同步 ==========
+import time
+import ssl
+
+def _fetch_article_metadata(pmid: str, ctx: ssl.SSLContext) -> Optional[dict]:
+    """从 PubMed API 获取单篇文章的元数据"""
+    url = f'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&rettype=abstract'
+    req = urllib.request.Request(url, headers={'Accept': 'text/plain'})
+    try:
+        with urllib.request.urlopen(req, timeout=20, context=ctx) as resp:
+            text = resp.read().decode('utf-8', errors='replace')
+        article = {}
+        pmid_match = re.search(r'<PMID[^>]*>([0-9]+)</PMID>', text)
+        if not pmid_match:
+            return None
+        article['pubmed_id'] = pmid_match.group(1)
+        title_match = re.search(r'<ArticleTitle>(.*?)</ArticleTitle>', text, re.DOTALL)
+        article['title'] = re.sub(r'<[^>]+>', '', title_match.group(1).strip()) if title_match else ''
+        abstract_parts = re.findall(r'<AbstractText[^>]*>(.*?)</AbstractText>', text, re.DOTALL)
+        article['abstract'] = re.sub(r'<[^>]+>', '', ' '.join(p.strip() for p in abstract_parts if p.strip())) if abstract_parts else ''
+        author_matches = re.findall(r'<LastName>(.*?)</LastName>.*?<Initials>(.*?)</Initials>', text, re.DOTALL)
+        article['authors'] = '; '.join(f'{ln} {init}' for ln, init in author_matches[:10])
+        journal_match = re.search(r'<Title>(.*?)</Title>', text)
+        article['journal'] = journal_match.group(1).strip() if journal_match else ''
+        pub_year_match = re.search(r'<PubDate>.*?<Year>([0-9]{4})</Year>', text)
+        article['pub_year'] = pub_year_match.group(1) if pub_year_match else ''
+        return article
+    except Exception as e:
+        print(f'  ⚠️ 获取文章 {pmid} 失败: {e}')
+        return None
+
+
+def _sync_articles_metadata(conn: sqlite3.Connection) -> int:
+    """
+    为 pdb_structures 中本周新出现的 pubmed_id 获取文献元数据。
+    只获取本周新插入的 PDB 条目的 pubmed_id（利用 fetch_date 判断）。
+    """
+    import re
+    ctx = ssl.create_default_context()
+
+    # 获取本周的 PDB 条目（fetch_date = 今天）且有 pubmed_id
+    today = datetime.now().strftime('%Y-%m-%d')
+    cursor = conn.execute("""
+        SELECT DISTINCT pubmed_id FROM pdb_structures
+        WHERE pubmed_id IS NOT NULL AND pubmed_id != ''
+        AND fetch_date = ?
+    """, (today,))
+    new_pmids = [row[0] for row in cursor.fetchall()]
+
+    if not new_pmids:
+        print('  📭 本周无新的 pubmed_id 需要获取')
+        return 0
+
+    print(f"  📚 开始获取 {len(new_pmids)} 篇新文献的元数据...")
+
+    # 检查哪些已经在 pubmed_articles 中
+    cursor = conn.execute("SELECT pubmed_id FROM pubmed_articles")
+    stored = {row[0] for row in cursor.fetchall()}
+
+    to_fetch = [p for p in new_pmids if p not in stored]
+    print(f"  📦 需要获取: {len(to_fetch)} 篇（已有: {len(stored)} 篇）")
+
+    if not to_fetch:
+        return 0
+
+    updated = 0
+    for i, pmid in enumerate(to_fetch):
+        if i > 0 and i % 20 == 0:
+            print(f"  进度: {i}/{len(to_fetch)}", flush=True)
+        article = _fetch_article_metadata(pmid, ctx)
+        if article:
+            conn.execute("""
+                INSERT OR REPLACE INTO pubmed_articles
+                (pubmed_id, title, authors, journal, pub_year, abstract, fetched_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (article['pubmed_id'], article['title'], article['authors'],
+                  article['journal'], article['pub_year'], article['abstract'],
+                  datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
+            updated += 1
+        time.sleep(0.35)  # 避免 PubMed API 限流
+
+    conn.commit()
+    print(f"  ✅ 文献元数据获取完成: {updated} 篇")
+    return updated
+
+
 # ========== 主函数 ==========
 def main():
     import argparse
@@ -583,7 +678,10 @@ def main():
             """, (snapshot['week_id'], start, end, snapshot['total'], snapshot['cryoem_count'],
                   snapshot['xray_count'], snapshot['cryoem_avg_res'], snapshot['xray_avg_res'], str(raw_path)))
             conn.commit()
-    
+
+            # Step 3: Fetch article metadata for new pubmed_ids
+            _sync_articles_metadata(conn)
+
     elif args.add_target:
         add_target(conn, args.add_target)
     
