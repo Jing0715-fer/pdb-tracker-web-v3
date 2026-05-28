@@ -1,0 +1,187 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model PdbStructure {
+  pdbId         String   @id
+  method        String?
+  releaseDate   String?
+  resolution    Float?
+  title         String?
+  doi           String?
+  journal       String?
+  journalIf     Float?
+  authors       String?
+  organisms     String?
+  ligands       String?
+  weekId        String?
+  pubmedId      String?
+  fetchDate     String?
+  createdAt     DateTime @default(now())
+
+  chains        PdbChain[]
+  entities      PdbEntity[]
+}
+
+model PdbChain {
+  id                Int     @id @default(autoincrement())
+  pdbId             String
+  asymId            String?
+  uniprotAccession  String?
+  geneName          String?
+  organismName      String?
+  sequence          String?
+  pdb               PdbStructure @relation(fields: [pdbId], references: [pdbId])
+}
+
+model PdbEntity {
+  id             Int     @id @default(autoincrement())
+  pdbId          String
+  entityId       Int?
+  moleculeType   String?
+  description    String?
+  pdb            PdbStructure @relation(fields: [pdbId], references: [pdbId])
+}
+
+model WeeklySnapshot {
+  weekId           String   @id
+  weekStart        String?
+  weekEnd          String?
+  totalStructures  Int      @default(0)
+  cryoemCount      Int      @default(0)
+  xrayCount        Int      @default(0)
+  nmrCount         Int      @default(0)
+  otherCount       Int      @default(0)
+  avgResolution    Float?
+  topJournals      String?
+  ifDist           String?
+  createdAt        DateTime @default(now())
+}
+
+model WeeklyReport {
+  id          Int      @id @default(autoincrement())
+  weekId      String?
+  reportType  String?
+  title       String?
+  content     String?
+  filename    String?
+  createdAt   DateTime @default(now())
+}
+
+model Evaluation {
+  uniprotId      String   @id
+  entryName      String?
+  proteinName    String?
+  geneNames      String?
+  organism       String?
+  sequenceLength Int?
+  coverage       Float?
+  scores         String?
+  report         String?
+  batchId        String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  pdbStructures  EvaluationPdbStructure[]
+  blastResults   EvaluationBlastResult[]
+  reports        EvaluationReport[]
+}
+
+model EvaluationPdbStructure {
+  id             Int      @id @default(autoincrement())
+  uniprotId      String
+  pdbId          String
+  method         String?
+  resolution     Float?
+  title          String?
+  depositionDate String?
+  releaseDate    String?
+  ligand         String?
+  ligandNames    String?
+  journal        String?
+  journalIf      Float?
+  doi            String?
+  pubmedId       String?
+  organism       String?
+  authors        String?
+  isCryoem       Boolean  @default(false)
+  isXray         Boolean  @default(false)
+  isNmr          Boolean  @default(false)
+  ifTier         String?
+  chainId        String?
+  unpStart       Int?
+  unpEnd         Int?
+
+  evaluation     Evaluation @relation(fields: [uniprotId], references: [uniprotId])
+}
+
+model EvaluationBlastResult {
+  id              Int      @id @default(autoincrement())
+  uniprotId       String
+  pdbId           String
+  uniprotRef      String?
+  description     String?
+  identity        Float?
+  evalue          String?
+  queryCoverage   Float?
+  targetCoverage  Float?
+  method          String?
+  resolution      Float?
+  releaseDate     String?
+  source          String?
+  taxonomyId      String?
+  journal         String?
+  journalIf       Float?
+  ifTier          String?
+  ligand          String?
+  title           String?
+  pubmedId        String?
+  pubmedTitle     String?
+  pubmedAuthors   String?
+  pubmedAbstract  String?
+
+  evaluation      Evaluation @relation(fields: [uniprotId], references: [uniprotId])
+}
+
+model EvaluationBatch {
+  batchId        String   @id @default(cuid())
+  title          String?
+  combinedReport String?
+  createdAt      DateTime @default(now())
+}
+
+model EvaluationReport {
+  id          Int      @id @default(autoincrement())
+  uniprotId   String
+  title       String?
+  content     String?
+  createdAt   DateTime @default(now())
+
+  evaluation  Evaluation @relation(fields: [uniprotId], references: [uniprotId])
+}
+
+model PubMedArticle {
+  pubmedId  String   @id
+  title     String?
+  authors   String?
+  journal   String?
+  pubYear   String?
+  abstract  String?
+  doi       String?
+  createdAt DateTime @default(now())
+}
+
+model Ligand {
+  code        String   @id
+  name        String?
+  formula     String?
+  weight      String?
+  type        String?
+  description String?
+  imageUrl    String?
+}
