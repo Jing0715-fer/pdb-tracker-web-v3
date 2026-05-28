@@ -6,12 +6,11 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
   },
   reactStrictMode: false,
-  // Allow all hosts for LAN access
-  allowedHosts: ["*"],
+  serverExternalPackages: ["molstar"],
   async headers() {
     return [
       {
-        source: "/api/:path*",
+        source: "/:path*",
         headers: [
           { key: "Access-Control-Allow-Origin", value: "*" },
           { key: "Access-Control-Allow-Methods", value: "GET, POST, PUT, DELETE, OPTIONS" },

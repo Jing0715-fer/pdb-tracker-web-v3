@@ -8,12 +8,14 @@ import {
   ChevronRight, Database, BarChart3, TrendingUp, X,
   Sparkles, Loader2, ExternalLink, Users, Link2, Copy, Check, Menu,
   Calendar, ArrowRightLeft, LayoutDashboard, Clock, FileDown, Settings,
-  Microscope, ArrowUp, RefreshCw, Download, Box, Upload,
+  Microscope, ArrowUp, RefreshCw, Download, Box, Upload, ChevronLeft,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { FooterClock, ReportModal } from '@/components/ui/pdb-ui';
 import { HeaderParticles } from '@/components/ui/pdb-animated';
 import { QualityRing } from '@/components/quality-components';
@@ -180,6 +182,7 @@ export default function PdbTracker() {
   const [pageSize, setPageSize] = useState(25);
   const [detailPanelOpen, setDetailPanelOpen] = useState(false);
   const [selectedEntry, setSelectedEntry] = useState<PdbEntry | null>(null);
+  const [litPdbSelected, setLitPdbSelected] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<string>('all');
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [showSummary, setShowSummary] = useState(false);
@@ -234,6 +237,7 @@ export default function PdbTracker() {
   // Evaluation detail tab state
   const [evalDetailTab, setEvalDetailTab] = useState('Summary');
   const [selectedEvalStructure, setSelectedEvalStructure] = useState<EvalRow | null>(null);
+  const [evalReportContent, setEvalReportContent] = useState<string>('');
 
   // Evaluation sub-view state (default / compare / dashboard / timeline)
   const [evalSubView, setEvalSubView] = useState<'default' | 'compare' | 'dashboard' | 'timeline' | 'batch'>('default');
@@ -565,14 +569,37 @@ export default function PdbTracker() {
     return () => clearTimeout(timer);
   }, [searchQuery, mode, activeFilter, selectedSnapshot]);
 
-  // Fetch eval detail when selected
+  // Fetch eval detail and eval report markdown when selectedEval changes
   useEffect(() => {
     if (selectedEvalId) {
       fetchEvalDetail(selectedEvalId);
+      setEvalReportContent('');
     } else {
       setSelectedEval(null);
+      setEvalReportContent('');
     }
   }, [selectedEvalId]);
+
+  // Fetch evaluation report markdown from file when selectedEval is available
+  useEffect(() => {
+    if (selectedEval?.uniprotId) {
+      fetch(`/api/eval-report-file/${selectedEval.uniprotId}`)
+        .then(r => r.ok ? r.json() : null)
+        .then(data => {
+          if (data?.content) {
+            const stripped = data.content
+              .replace(/^---[\s\S]*?---\s*/m, '')
+              .replace(/^#\s+.+\n/, '')
+              .replace(/^\*\*[^*]+\*\*:\s*[^*]+\n/gm, '')
+              .replace(/^\*\*[^*]+\*\*:\s*/gm, '')
+              .replace(/^(created|updated|type|tags|sources):\s*[^\n]+\n/gim, '')
+              .trim();
+            setEvalReportContent(stripped);
+          }
+        })
+        .catch(() => {});
+    }
+  }, [selectedEval?.uniprotId]);
 
   // Fetch AI analysis when entry selected
   useEffect(() => {
@@ -840,24 +867,53 @@ export default function PdbTracker() {
     setSelectedEntryIds(new Set());
   }, []);
 
+  // When PDB clicked from literature, select it for detail view
+  const handleLitPdbClick = useCallback((pdbId: string) => {
+    setLitPdbSelected(pdbId);
+  }, []);
+
+  const handleLitPdbBack = useCallback(() => {
+    setLitPdbSelected(null);
+  }, []);
+
+
   // ─── Weekly Report Viewer ────────────────────────────────────────────────
 
-  const handleViewReport = useCallback((weekId?: string) => {
+  const handleViewReport = useCallback((weekId?: string, type?: 'xray' | 'cryoem') => {
     const targetWeekId = weekId || selectedSnapshot;
-    const report = weeklyReports.find(r => r.weekId === targetWeekId);
-    if (report && report.content) {
-      setSelectedReport({ title: `Weekly Report — ${report.weekId}`, content: report.content });
-      setReportModalOpen(true);
-    }
+    fetch(`/api/weekly-report-file?weekId=${encodeURIComponent(targetWeekId)}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.files && data.files.length > 0) {
+          const targetFile = type
+            ? data.files.find((f: any) => f.type === type) || data.files[0]
+            : data.files[0];
+          if (targetFile) {
+            setSelectedReport({ title: `Weekly Report — ${targetFile.filename.replace(/\.md$/, '')}`, content: targetFile.content });
+            setReportModalOpen(true);
+          }
+        } else {
+          const report = weeklyReports.find(r => r.weekId === targetWeekId);
+          if (report && report.content) {
+            setSelectedReport({ title: `Weekly Report — ${report.weekId}`, content: report.content });
+            setReportModalOpen(true);
+          }
+        }
+      })
+      .catch(() => {
+        const report = weeklyReports.find(r => r.weekId === targetWeekId);
+        if (report && report.content) {
+          setSelectedReport({ title: `Weekly Report — ${report.weekId}`, content: report.content });
+          setReportModalOpen(true);
+        }
+      });
   }, [weeklyReports, selectedSnapshot]);
 
-  const hasReportForWeek = useCallback((weekId: string | null) => {
-    return weeklyReports.some(r => r.weekId === weekId && r.content);
+  const getReportCountForWeek = useCallback((weekId: string | null) => {
+    if (!weekId) return 0;
+    if (/W\d+/i.test(weekId)) return 2;
+    return weeklyReports.some(r => r.weekId === weekId && r.content) ? 1 : 0;
   }, [weeklyReports]);
-
-  const hasReportForSelectedWeek = useMemo(() => {
-    return hasReportForWeek(selectedSnapshot);
-  }, [hasReportForWeek, selectedSnapshot]);
 
   // ─── Snapshot Method Distribution Bar ──────────────────────────────────────
 
@@ -906,21 +962,6 @@ export default function PdbTracker() {
               <h3 className="text-xs font-semibold text-claude-text-secondary uppercase tracking-wider">
                 Weekly Snapshots
               </h3>
-              {!mobile && hasReportForSelectedWeek && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={handleViewReport}
-                      className="h-5 px-1.5 text-[10px] text-claude-accent hover:text-claude-accent-hover hover:bg-claude-accent/10 active:scale-95 transition-transform duration-100"
-                    >
-                      <FileText className="h-3 w-3" />
-                    </Button>
-                  </TooltipTrigger>
-                  <TooltipContent side="right"><p>View Weekly Report</p></TooltipContent>
-                </Tooltip>
-              )}
             </div>
           )}
           {mobile ? (
@@ -971,18 +1012,27 @@ export default function PdbTracker() {
                   <span className={`text-xs font-semibold ${isActive ? 'text-claude-accent' : 'text-claude-text'}`}>
                     {(sidebarCollapsed && !mobile) ? snap.weekId.replace('2025-', '') : snap.weekId}
                   </span>
-                  {(!sidebarCollapsed || mobile) && hasReportForWeek(snap.weekId) && (
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); handleViewReport(snap.weekId); }}
-                          className="h-4 w-4 p-0 flex items-center justify-center rounded hover:bg-claude-accent/10 active:scale-90 transition-all duration-100"
-                        >
-                          <ScrollText className="h-3 w-3 text-claude-accent/70 hover:text-claude-accent" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent side="right"><p>View Report</p></TooltipContent>
-                    </Tooltip>
+                  {(!sidebarCollapsed || mobile) && getReportCountForWeek(snap.weekId) > 0 && (
+                    <div className="flex items-center gap-0.5">
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <button onClick={(e) => { e.stopPropagation(); handleViewReport(snap.weekId, 'xray'); }} className="h-4 w-4 p-0 flex items-center justify-center rounded border border-[#7c5cbf]/40 hover:bg-claude-accent/10 active:scale-90 transition-all duration-100">
+                            <span className="text-[8px] font-bold text-[#7c5cbf]">X</span>
+                          </button>
+                        </TooltipTrigger>
+                        <TooltipContent side="right"><p>X-ray Report</p></TooltipContent>
+                      </Tooltip>
+                      {getReportCountForWeek(snap.weekId) > 1 && (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button onClick={(e) => { e.stopPropagation(); handleViewReport(snap.weekId, 'cryoem'); }} className="h-4 w-4 p-0 flex items-center justify-center rounded border border-[#2d8f8f]/40 hover:bg-claude-accent/10 active:scale-90 transition-all duration-100">
+                              <span className="text-[8px] font-bold text-[#2d8f8f]">E</span>
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent side="right"><p>Cryo-EM Report</p></TooltipContent>
+                        </Tooltip>
+                      )}
+                    </div>
                   )}
                 </div>
                 <div className="flex items-center gap-1.5">
@@ -1485,7 +1535,93 @@ export default function PdbTracker() {
   // ─── Render: Detail Panel ────────────────────────────────────────────────
 
   const renderDetailPanel = () => {
-    if (!detailPanelOpen && !litIsDetailOpen) return null;
+    if (!detailPanelOpen && !litIsDetailOpen && !litPdbSelected) return null;
+
+    // PDB detail from literature mode — show same detail panel but with back button
+    if (mode === 'literature' && litPdbSelected) {
+      const pdbEntry = entries.find(e => e.pdbId === litPdbSelected) || (() => {
+        // Try to find in blast results
+        for (const row of blastResults) {
+          if (row.pdbId === litPdbSelected) {
+            return {
+              pdbId: row.pdbId,
+              title: row.title || row.pdbId,
+              method: row.method || '',
+              resolution: row.resolution ?? null,
+              authors: '',
+              releaseDate: '',
+              isCryoem: (row.method || '').toLowerCase().includes('em'),
+              isXray: (row.method || '').toLowerCase().includes('x-ray'),
+              isNmR: false,
+              journal: '',
+              organisms: '',
+            };
+          }
+        }
+        return null;
+      })();
+
+      if (!pdbEntry) return null;
+      const qualityScore = computeQualityScore(pdbEntry);
+      const pdbDetailContent = (
+        <>
+          {/* Header */}
+          <div className="px-4 py-3 border-b border-claude-border dark:border-[#3d3832] flex items-center justify-between bg-gradient-to-r from-[#faf7f4] to-[#f5f0ea] dark:from-[#242220] dark:to-[#2b2926]">
+            <div className="flex items-center gap-2">
+              <Button variant="ghost" size="sm" onClick={handleLitPdbBack} className="h-7 w-7 p-0 rounded-full bg-claude-border-light/80 dark:bg-[#2b2926]/80 hover:bg-claude-accent/10 text-claude-text-muted hover:text-claude-accent transition-all duration-200">
+                <ChevronLeft className="h-4 w-4" />
+              </Button>
+              <span className="font-mono font-bold text-sm text-claude-accent">{pdbEntry.pdbId}</span>
+            </div>
+          </div>
+          {/* 3D Structure Preview */}
+          <div className="p-4 border-b border-claude-border/50 dark:border-[#3d3832]/50">
+            <div className="flex items-center gap-1.5 mb-2">
+              <Box className="h-3.5 w-3.5 text-claude-accent" />
+              <span className="text-[10px] font-medium text-claude-text-muted uppercase tracking-wider">3D Structure</span>
+            </div>
+            <PdbThumbnailPreview
+              pdbId={pdbEntry.pdbId}
+              title={pdbEntry.title}
+              onClick={() => { setViewerModalPdbId(pdbEntry.pdbId); setViewerModalOpen(true); }}
+            />
+          </div>
+          {/* Title */}
+          <div className="px-4 py-3 border-b border-claude-border/50 dark:border-[#3d3832]/50">
+            <div className="text-xs text-claude-text-muted mb-1">Title</div>
+            <div className="text-sm text-claude-text font-medium leading-snug">{pdbEntry.title || '—'}</div>
+          </div>
+          {/* Method & Resolution */}
+          <div className="px-4 py-3 space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <div className="text-xs text-claude-text-muted mb-1">Method</div>
+                <span className={`method-badge inline-flex px-2 py-0.5 rounded text-[11px] font-medium border ${
+                  pdbEntry.isCryoem ? 'method-badge-cryoem bg-claude-cryoem-bg text-claude-cryoem border-claude-cryoem/30' :
+                  pdbEntry.isXray ? 'method-badge-xray bg-claude-xray-bg text-claude-xray border-claude-xray/30' :
+                  'method-badge-nmr bg-claude-nmr-bg text-claude-nmr border-claude-nmr/30'
+                }`}>
+                  {pdbEntry.method || 'Unknown'}
+                </span>
+              </div>
+              <div>
+                <div className="text-xs text-claude-text-muted mb-1">Resolution</div>
+                <div className={`text-sm font-mono font-semibold ${
+                  pdbEntry.resolution != null
+                    ? pdbEntry.resolution <= 2.0 ? 'text-green-600 dark:text-green-400'
+                      : pdbEntry.resolution <= 3.5 ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-red-500 dark:text-red-400'
+                    : 'text-claude-text-muted'
+                }`}>
+                  {pdbEntry.resolution != null ? `${pdbEntry.resolution.toFixed(2)}Å` : '—'}
+                </div>
+              </div>
+            </div>
+          </div>
+        </>
+      );
+      return renderDetailPanelWrapper(pdbDetailContent, handleLitPdbBack);
+    }
 
     // Literature detail panel (inline, matches sidebar+main+detail pattern)
     if (mode === 'literature' && litIsDetailOpen && litSelectedPaper) {
@@ -1822,7 +1958,8 @@ export default function PdbTracker() {
                       : null;
                     return (
                       <div key={pdb.pdbId}
-                        className="flex items-center gap-2 p-2.5 rounded-lg border border-claude-border/60 dark:border-[#3d3832]/60 bg-claude-border-light/30 dark:bg-[#1a1917]/30 hover:bg-claude-border-light/60 dark:hover:bg-[#2b2926]/60 transition-colors">
+                        onClick={() => handleLitPdbClick(pdb.pdbId)}
+                        className="flex items-center gap-2 p-2.5 rounded-lg border border-claude-border/60 dark:border-[#3d3832]/60 bg-claude-border-light/30 dark:bg-[#1a1917]/30 hover:bg-claude-accent/10 dark:hover:bg-claude-accent/10 cursor-pointer transition-colors">
                         {/* Resolution quality dot */}
                         {resDotColor && (
                           <span className={`inline-block h-2 w-2 rounded-full flex-shrink-0 ${resDotColor}`} title={
@@ -1831,10 +1968,13 @@ export default function PdbTracker() {
                             'Low resolution (≥3.5Å)'
                           } />
                         )}
-                        <a href={`https://www.rcsb.org/structure/${pdb.pdbId}`} target="_blank" rel="noopener noreferrer"
-                          className="text-xs font-mono font-bold text-claude-accent dark:text-claude-accent-hover hover:underline">
+                        <button
+                          onClick={() => {
+                            handleLitPdbClick(pdb.pdbId);
+                          }}
+                          className="text-xs font-mono font-bold text-claude-accent dark:text-claude-accent-hover hover:underline cursor-pointer">
                           {pdb.pdbId}
-                        </a>
+                        </button>
                         <span className={`inline-flex px-1.5 py-0.5 rounded text-[9px] font-medium ${methodStyle.bg} ${methodStyle.text} ${methodStyle.border} border`}>
                           {getMethodLabel(pdb.method || '')}
                         </span>
@@ -2373,9 +2513,17 @@ export default function PdbTracker() {
       // Inline Report tab content
       const evalReportTab = (
         <div className="space-y-3">
-          {selectedEval.report ? (
+          {evalReportContent ? (
             <div className="text-xs text-claude-text-secondary leading-relaxed whitespace-pre-wrap p-3 rounded-lg bg-claude-border-light/50 dark:bg-[#1a1917]/50 border border-claude-border/50 dark:border-[#3d3832]/50">
-              {selectedEval.report}
+              <div className="markdown-content">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{evalReportContent}</ReactMarkdown>
+              </div>
+            </div>
+          ) : selectedEval.report ? (
+            <div className="text-xs text-claude-text-secondary leading-relaxed whitespace-pre-wrap p-3 rounded-lg bg-claude-border-light/50 dark:bg-[#1a1917]/50 border border-claude-border/50 dark:border-[#3d3832]/50">
+              <div className="markdown-content">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{selectedEval.report}</ReactMarkdown>
+              </div>
             </div>
           ) : (
             <div className="text-xs text-claude-text-muted py-4 text-center">No report available</div>
@@ -2715,12 +2863,12 @@ export default function PdbTracker() {
           </div>
 
           {/* Mode Tabs */}
-          <div className="flex items-center bg-claude-border-light dark:bg-[#2b2926] rounded-lg p-0.5 ml-4">
+          <div className="flex items-center bg-claude-border-light dark:bg-[#2b2926] rounded-lg p-0.5 ml-4 gap-0.5">
             {MODE_TABS.map(tab => (
               <button
                 key={tab.mode}
                 onClick={() => handleModeSwitch(tab.mode)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 claude-focus-ring ${
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-150 claude-focus-ring min-w-[80px] ${
                   mode === tab.mode
                     ? 'bg-claude-surface dark:bg-[#242220] text-claude-accent shadow-sm mode-tab-active'
                     : 'text-claude-text-muted hover:text-claude-text-secondary'
@@ -2728,7 +2876,7 @@ export default function PdbTracker() {
                 title={`${tab.label} (${tab.shortcut})`}
               >
                 {tab.icon}
-                <span className="hidden sm:inline">{tab.label}</span>
+                <span>{tab.label}</span>
               </button>
             ))}
           </div>
@@ -3028,7 +3176,7 @@ export default function PdbTracker() {
               />
               {mode === 'weekly' && <div key="weekly" className="mode-content-enter">{renderWeeklyContent()}</div>}
               {mode === 'evaluation' && <div key="eval" className="mode-content-enter">{renderEvalContent()}</div>}
-              {mode === 'literature' && <div key="lit" className="mode-content-enter">{renderLiteratureContent()}</div>}
+              {mode === 'literature' && <div key="lit" className="mode-content-enter flex flex-col min-h-0 flex-1">{renderLiteratureContent()}</div>}
             </motion.div>
           </AnimatePresence>
         </div>

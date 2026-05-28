@@ -143,7 +143,7 @@ export function LiteraturePaperList({
   // Table view
   return (
     <div className="rounded-xl border border-claude-border dark:border-[#3d3832] overflow-hidden">
-      <div className="overflow-x-auto custom-scrollbar">
+      <div className="overflow-x-auto overflow-y-auto custom-scrollbar max-h-[calc(100vh-280px)]">
         <table className="w-full text-xs">
           <thead>
             <tr className="border-b border-claude-border dark:border-[#3d3832] bg-gradient-to-r from-[#faf7f4] to-[#f5f0ea] dark:from-[#242220] dark:to-[#2b2926]">
@@ -279,7 +279,7 @@ function PaperListSkeleton({ viewMode }: { viewMode: ViewMode }) {
 
   return (
     <div className="rounded-xl border border-claude-border dark:border-[#3d3832] overflow-hidden">
-      <div className="overflow-x-auto">
+      <div className="overflow-x-auto overflow-y-auto custom-scrollbar max-h-[calc(100vh-280px)]">
         <table className="w-full">
           <thead>
             <tr className="border-b border-claude-border dark:border-[#3d3832] bg-gradient-to-r from-[#faf7f4] to-[#f5f0ea] dark:from-[#242220] dark:to-[#2b2926]">

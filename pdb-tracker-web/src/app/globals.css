@@ -239,39 +239,43 @@
 
 /* Markdown content styles */
 .markdown-content h1 {
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   font-weight: 700;
   margin-bottom: 0.75rem;
   margin-top: 1.5rem;
-  color: #1a1a1a;
+  color: #c96442;
+  border-bottom: 2px solid #c96442;
+  padding-bottom: 0.5rem;
 }
 
 .dark .markdown-content h1 {
-  color: #e8e4dd;
+  color: #d4784f;
+  border-bottom-color: #d4784f;
 }
 
 .markdown-content h2 {
-  font-size: 1.25rem;
-  font-weight: 600;
-  margin-bottom: 0.5rem;
-  margin-top: 1.25rem;
-  color: #1a1a1a;
-}
-
-.dark .markdown-content h2 {
-  color: #e8e4dd;
-}
-
-.markdown-content h3 {
   font-size: 1.1rem;
   font-weight: 600;
   margin-bottom: 0.5rem;
-  margin-top: 1rem;
-  color: #1a1a1a;
+  margin-top: 1.25rem;
+  color: #8b4a2e;
+  border-left: 3px solid #c96442;
+  padding-left: 0.5rem;
 }
 
+.dark .markdown-content h2 {
+  color: #b86840;
+  border-left-color: #d4784f;
+}
+.markdown-content h3 {
+  font-size: 1rem;
+  font-weight: 600;
+  margin-bottom: 0.5rem;
+  margin-top: 1rem;
+  color: #6b3d25;
+}
 .dark .markdown-content h3 {
-  color: #e8e4dd;
+  color: #a06040;
 }
 
 .markdown-content p {

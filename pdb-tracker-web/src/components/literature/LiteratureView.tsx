@@ -452,7 +452,7 @@ export function LiteratureContent({
       </AnimatePresence>
 
       {/* Paper list */}
-      <div className="flex-1 overflow-auto px-4">
+      <div className="flex-1 overflow-auto px-4 min-h-0">
         <LiteraturePaperList
           papers={filteredPapers}
           viewMode={viewMode}
