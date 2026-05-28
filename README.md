@@ -1,110 +1,68 @@
-# PDB Tracker
+# PDB Tracker Web
 
-蛋白质结构追踪与评估系统 - 用于监控PDB数据库更新并评估蛋白质结构可行性。
+A full-featured Next.js web application for tracking, analyzing, and managing protein structures from the PDB (Protein Data Bank). Built with React 19, TypeScript, Tailwind CSS, and Shadcn UI.
 
-## 功能特性
+> **This is the Next.js version of PDB Tracker.** For the legacy Flask version, see the `pdb-tracker-web/` subdirectory.
 
-- **PDB数据库监控**: 自动跟踪RCSB PDB数据库的最新结构发布
-- **蛋白质结构评估**: 基于序列分析评估蛋白质结构解析可行性
-- **BLAST同源搜索**: 自动搜索同源蛋白结构
-- **Web可视化界面**: 基于Flask的现代化Web UI
-- **期刊影响因子**: 集成期刊IF数据评估结构质量
-- **配体分析**: 识别和展示结构中的配体信息
+## Three Main Modes
 
-## 项目结构
+PDB Tracker Web provides three fully-featured modes accessible from the sidebar:
 
-```
-.
-├── pdb_web_ui.py          # Flask Web应用程序主文件
-├── web_scripts/           # Web前端资源
-│   └── pdb_app.js         # 前端JavaScript
-├── migrate_blast_data.py  # BLAST数据迁移工具
-├── pdb_index.html         # 前端HTML模板
-└── pdb_tracker.db         # SQLite数据库
-```
+### 1. Weekly Mode 📅
+Browse and track newly published PDB structures by publication week.
 
-## 环境变量配置
+- Weekly Reports with auto-generated text summaries
+- Timeline View: Year calendar heatmap + bar chart of publication trends
+- Advanced Filtering by resolution, method (Cryo-EM/X-ray/NMR), IF tier, date
+- Sortable Table: PDB ID, method, resolution, journal IF, publication date
+- PDB Detail Panel: title, authors, journal, method, resolution, ligand info
+- Activity Feed with real-time updates
+
+### 2. Evaluation Mode 🔬
+Evaluate structural coverage for any UniProt ID using BLAST homology detection.
+
+- UniProt ID search for structural coverage evaluation
+- BLAST Homology Detection via RCSB BLAST API
+- PDB Coverage Table with resolution, method, organism, identity %
+- Feasibility Scoring: multi-factor radar chart
+- Domain Coverage analysis
+- Ramachandran Plot (phi/psi from PDB coordinates)
+- Validation Metrics: clash score, rotamer outliers, MolProbity score
+- Batch Evaluation: compare multiple targets side-by-side
+- Gantt Timeline and Scatter Plot visualizations
+- Evaluation Report generation
+
+### 3. Literature Mode 📚
+Manage and organize scientific papers and citations.
+
+- PubMed article tracking and management
+- Citation Network: interactive graph of paper relationships
+- Reading Lists with notes and tags
+- Journal IF tracking and display
+- Advanced filters by tags, date, journal, authors
+
+## Quick Start
 
 ```bash
-# 数据目录配置
-export PDB_DATA_DIR="/path/to/data"           # 数据根目录 (默认 ~/.pdb-tracker/)
-export PDB_DB_DIR="/path/to/db"               # 数据库目录
-export PDB_DB_NAME="pdb_tracker.db"           # 数据库文件名
-export PDB_WEEKLY_DIR="/path/to/reports"      # 周报目录
-export PDB_WEB_SCRIPT_DIR="/path/to/scripts"  # Web脚本目录
-export PDB_WEB_PORT=5555                       # Web服务端口
+# Enter the Next.js project directory
+cd pdb-tracker-web
+
+# Install dependencies
+npm install
+
+# Push database schema
+npx prisma db push
+
+# Start development server
+npm run dev
 ```
 
-## 安装依赖
+Open [http://localhost:3000](http://localhost:3000).
 
-```bash
-pip install flask requests python-dotenv
-```
+## Tech Stack
 
-## 启动服务
+Next.js 16 · React 19 · TypeScript · Tailwind CSS · Shadcn UI · Mol* (molstar) · Prisma + SQLite · Recharts
 
-```bash
-python pdb_web_ui.py
-```
+## License
 
-服务启动后访问: http://localhost:5555
-
-## 核心功能模块
-
-### 1. PDB数据获取
-- 支持从RCSB REST API获取结构详情
-- 自动提取方法、分辨率、发表日期、期刊信息
-- 并发请求优化性能
-
-### 2. BLAST同源搜索
-- 自动搜索同源蛋白结构
-- 计算序列相似度(Identity)和覆盖率
-- 从PDB数据库获取实际标题(非BLAST描述)
-
-### 3. 结构评估报告
-- 生成Markdown格式的评估报告
-- 包含可行性评分(X-ray/Cryo-EM/NMR)
-- 同源结构详细分析
-
-### 4. 数据存储
-- SQLite数据库存储所有数据
-- 支持评估结果持久化
-- 期刊影响因子缓存
-
-## 数据库表结构
-
-### evaluations
-存储蛋白质评估基本信息
-
-### evaluation_pdb_structures
-存储PDB结构详细信息
-
-### evaluation_blast_results
-存储BLAST同源搜索结果
-
-### evaluation_reports
-存储评估报告(Markdown格式)
-
-## API端点
-
-| 端点 | 方法 | 描述 |
-|------|------|------|
-| `/api/evaluations` | GET | 列出所有评估 |
-| `/api/evaluations/<id>` | GET | 获取单个评估详情 |
-| `/api/evaluations` | POST | 保存评估结果 |
-| `/api/evaluation/reports/list` | GET | 列出评估报告 |
-| `/api/snapshots` | GET | 获取周快照数据 |
-| `/api/entries` | GET | 获取PDB条目列表 |
-
-## 技术栈
-
-- **后端**: Python + Flask
-- **前端**: Vanilla JavaScript (ES6)
-- **数据库**: SQLite3
-- **API**: RCSB PDB REST API v1/v2
-- **外部服务**: NCBI BLAST
-
-## 开发者
-
-- 作者: lijing
-- 创建日期: 2024
+MIT
