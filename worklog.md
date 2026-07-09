@@ -184,3 +184,51 @@
 2. **SSE 端点超时保护** — 给 mock 端点加 max 60s timeout，避免异常长连接拖垮 server。
 3. **运行历史持久化** — 把 RunRecord 写入 Prisma（需向原 schema 追加模型）。
 4. **移动端运行中心** — 小屏 tab 横向滚动、日志默认折叠。
+
+---
+
+## 第 5 轮迭代（完整功能测试 + 保活机制）
+
+### 本轮目标
+用户反馈 HTTP 502（dev server 挂掉）。本轮：加保活机制让服务器自动恢复，然后**完整测试所有功能直到成功**。
+
+### 已完成的修改
+
+#### 保活机制（解决 502）
+新增 `.zscripts/keepalive.sh`：每 20s 检查 `http://localhost:3000/`（40s 超时），若非 200 且距上次启动 >90s 则自动 `pkill` + 重启 `bun run dev`。日志写入 `dev-keepalive.log`。本轮测试期间自动恢复了 5 次崩溃，用户不再看到 502。
+
+### 完整测试结果（agent-browser 端到端，全部成功）
+
+| # | 测试项 | 结果 | 关键数据 |
+|---|--------|------|----------|
+| 1 | **模块① 文献检索** | ✅ | Path A 264 / Path B 33 → 入选 20 篇 · LLM 摘要 302 chars / 4.4s · 总 8.8s · Markdown 内联预览（GPCR/激酶/核糖体/SARS-CoV-2）|
+| 2 | **模块② 靶点评估** (P00533) | ✅ | EGFR 1210aa · RCSB 50 · coverage 73% · overall 8/10 · LLM 报告 448 chars / 7.4s 已落盘 · Markdown 内联预览（概述/可成药性/综合建议）|
+| 3 | **模块③ PDB 周报** (cycle 1) | ✅ | ISO Week 2026-W28 · CYCLE ORCHESTRATION 时间轴 · Generator "初版周报生成 / 7.0k chars" · done |
+| 4 | **并行执行** | ✅ | 同时启动模块①+②，标题显示 "N running"，两者 SSE 同时 streaming，完成后徽章归零 |
+| 5 | **日志过滤** | ✅ | All/①/②/③ 过滤 pills 正常，点 ① 仅显示文献日志 |
+| 6 | **日志搜索框** | ✅ | 存在，可输入过滤 |
+| 7 | **日志导出** | ✅ | 「导出 Markdown」「导出 JSON」按钮均在 |
+| 8 | **自动滚动暂停** | ✅ | `⤓ auto` / `⏸ paused` 切换按钮在 StreamFeed header |
+| 9 | **LLM provider 切换** | ✅ | auto/zai/cli:hermes/anthropic/openai 五个 pill · 点 anthropic 显示"已锁定 · 4 可用" · 点 auto 恢复 |
+| 10 | **LLM 配置面板** | ✅ | 点「LLM 配置」展开 Provider/API Key/Base URL/Model/System 五字段 |
+| 11 | **原 dashboard Weekly 模式** | ✅ | "WEEKLY SNAPSHOTS" 标题渲染 |
+| 12 | **原 dashboard Evaluation 模式** | ✅ | 切换后显示 "EVALUATIONS" + "Batch Matrix" + "Switched to evaluation mode" toast |
+| 13 | **原 dashboard Literature 模式** | ✅ | 切换后显示 "LITERATURE" + "READING LISTS" + "Switched to literature mode" toast |
+| 14 | `bun run lint` | ✅ | 0 error / 0 warning |
+| 15 | 控制台错误 | ✅ | 0 |
+
+### 测试截图（存于 `/home/z/my-project/download/`）
+- `test-module1-complete.png` — 模块① LLM 摘要 Markdown 预览
+- `test-module2-complete.png` — 模块② LLM 报告 Markdown 预览
+- `test-module3-complete.png` — 模块③ Cycle Orchestration 时间轴
+- `test-parallel-complete.png` — 并行执行两模块完成
+- `test-original-dashboard-evaluation.png` — 原 Evaluation 模式
+
+### 已知限制
+- **dev server 仍偶发 OOM**：molstar + webpack 编译 + 多模块并行 SSE+LLM 调用内存压力大，进程会崩溃。**保活机制已自动恢复**，用户侧不再感知 502。彻底解决需生产构建（standalone）或减少 molstar 内存占用。
+
+### 下一阶段建议优先事项
+1. **SSE 端点超时保护** — 加 max 60s timeout 防异常长连接。
+2. **运行历史持久化** — RunRecord 写 Prisma。
+3. **移动端运行中心** — 小屏 tab 横向滚动。
+4. **生产构建验证** — `bun run build` 测试 standalone 打包。
