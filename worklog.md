@@ -130,3 +130,57 @@
 2. **LLM 预览增强** — 报告内嵌"再生成"按钮、复制为纯文本/Markdown 切换。
 3. **CycleTimeline 进度** — 运行中显示当前 cycle 的实时进度百分比。
 4. **dev server 稳定性** — 考虑给 SSE mock 端点降低并发或加 timeout 保护。
+
+---
+
+## 第 4 轮迭代（稳定性 + 运行中心重构）
+
+### 本轮目标
+用户反馈"页面加载不出来"。根因：molstar（95MB / 2977 JS 文件）+ webpack 编译太重，dev server 频繁 OOM 退出。本轮重点：**让服务器稳定运行**，同时把 Skills 弹窗打磨成更专业的「运行中心」。
+
+### 已完成的修改
+
+#### 1. 服务器稳定性（核心修复）
+| 改动 | 说明 |
+|------|------|
+| `src/app/layout.tsx` | 移除顶层 `import "molstar/build/viewer/molstar.css"` — 该 import 强制 webpack 在首屏 SSR 编译时遍历 95MB molstar 图谱，是 OOM 主因。molstar CSS 现仅在 `PdbStructureViewer`（动态加载的 modal）内引入 |
+| `next.config.ts` | `reactStrictMode: false`（关闭双渲染，减半编译负担）|
+| `package.json` dev 脚本 | `NODE_OPTIONS="--max-old-space-size=4096"`（Node 堆 4GB，避免编译期 OOM）|
+
+#### 2. Skills 弹窗 → 「运行中心」重构
+| 改动 | 说明 |
+|------|------|
+| **改名** | header 按钮 `Skills` → `运行中心`；弹窗标题 `Skills & 手动执行` → `运行中心`；描述改为"结构生物学智能任务中心…支持并行触发" |
+| **并行执行** | `running: string \| null`（互斥锁）→ `running: Set<string>`（多模块并行）。三个模块可同时运行，按钮上的运行计数徽章显示当前并行数 |
+| **实时进度 UI** | StreamFeed header 显示实时耗时计时器（200ms tick）+ "实时进度"标题 + processing/complete·百分比；完成时显示 ✓/✗ + 总耗时 |
+| **自动滚动暂停** | 日志区新增 `⤓ auto` / `⏸ paused` 切换按钮，用户可暂停自动滚动以查看历史日志，运行中也能手动滚回 |
+| **运行计数徽章** | header 按钮右上角显示当前运行模块数（sky 色圆点）；弹窗标题区显示 "N running" 徽章 |
+| **导出文件名** | `skills-logs-*` → `runcenter-logs-*`；导出标题 "运行中心执行日志" |
+
+### 验证结果（agent-browser 端到端）
+
+| 验证项 | 结果 |
+|--------|------|
+| 页面加载（首次编译 28s，200） | ✅ |
+| 原 PDB Structure Tracker dashboard 完好 | ✅ |
+| header 按钮显示「运行中心」 | ✅ |
+| 弹窗标题「运行中心 3 modules」 | ✅ |
+| **并行执行**：启动模块① → 切换到模块② → 启动模块②（两者同时运行） | ✅ 标题显示「运行中心 3 modules 2 running」 |
+| 模块② 完成显示 LLM 报告内联预览（424 chars / 3.9s） | ✅ |
+| 模块① 完成显示 LLM 摘要预览 | ✅ |
+| 实时进度 UI（耗时计时器 + processing·% + auto/paused 按钮） | ✅ |
+| 两模块完成后运行计数徽章归零 | ✅ 标题恢复「运行中心 3 modules」 |
+| 控制台错误 | ✅ 0 |
+| `bun run lint` | ✅ 0 error |
+
+### 新增截图
+- `runcenter-parallel-execution.png` — 运行中心弹窗，2 个模块并行执行
+
+### 已知限制
+- **dev server 仍偶发 OOM**：4GB 堆 + 移除 molstar 顶层 import 后稳定性显著提升，但长时间连续多次 SSE+LLM 调用后进程仍可能被沙箱终止。重启 `bun run dev` 即恢复，不影响功能。
+
+### 下一阶段建议优先事项
+1. **生产构建测试** — 用 `bun run build` 验证 molstar 在 standalone 构建下的打包。
+2. **SSE 端点超时保护** — 给 mock 端点加 max 60s timeout，避免异常长连接拖垮 server。
+3. **运行历史持久化** — 把 RunRecord 写入 Prisma（需向原 schema 追加模型）。
+4. **移动端运行中心** — 小屏 tab 横向滚动、日志默认折叠。

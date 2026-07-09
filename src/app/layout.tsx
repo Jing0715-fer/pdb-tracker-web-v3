@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import "molstar/build/viewer/molstar.css";
 import { ThemeProvider } from "next-themes";
 import { Toaster } from "sonner";
 
 // Fonts: CSS variable stubs (no Google Fonts - network unavailable)
 const geistSans = { variable: "--font-geist-sans" };
 const geistMono = { variable: "--font-geist-mono" };
+
+// molstar CSS is injected client-side on demand (see PdbStructureViewer) so
+// the initial server compile doesn't have to traverse the 95MB molstar graph.
 
 export const metadata: Metadata = {
   title: "PDB Structure Tracker",

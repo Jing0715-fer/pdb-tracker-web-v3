@@ -3,7 +3,7 @@
   "version": "0.2.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --webpack -p 3000 2>&1 | tee dev.log",
+    "dev": "NODE_OPTIONS=\"--max-old-space-size=4096\" next dev --webpack -p 3000 2>&1 | tee dev.log",
     "build": "next build --webpack && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ && cp -r prisma .next/standalone/ && cp -r node_modules/@prisma .next/standalone/node_modules/@prisma && cp .env .next/standalone/.env",
     "start": "NODE_ENV=production node -r dotenv/config .next/standalone/server.js",
     "lint": "eslint .",

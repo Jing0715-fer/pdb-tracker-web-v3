@@ -199,13 +199,25 @@ function StreamFeed({
 }) {
   const lastProgress = events.filter(e => typeof e.progress === 'number').slice(-1)[0]?.progress ?? null;
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [autoScroll, setAutoScroll] = useState(true);
+  const startTime = events[0]?.ts;
+  const [elapsed, setElapsed] = useState(0);
 
-  // auto-scroll to bottom when new events arrive while running
+  // live elapsed timer while running
   useEffect(() => {
-    if (running && scrollRef.current) {
+    if (!running || !startTime) return;
+    const tick = () => setElapsed(Date.now() - new Date(startTime).getTime());
+    tick();
+    const id = setInterval(tick, 200);
+    return () => clearInterval(id);
+  }, [running, startTime]);
+
+  // auto-scroll to bottom when new events arrive (unless user paused)
+  useEffect(() => {
+    if (running && autoScroll && scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [events.length, running]);
+  }, [events.length, running, autoScroll]);
 
   if (events.length === 0) {
     return (
@@ -221,10 +233,25 @@ function StreamFeed({
       {/* header */}
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/60 bg-muted/40">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">SSE Progress</span>
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">实时进度</span>
           <span className="text-[10px] text-muted-foreground/70">({events.length} events)</span>
+          {running && startTime && (
+            <span className="text-[10px] font-mono text-sky-600 dark:text-sky-300 tabular-nums flex items-center gap-0.5">
+              <Clock className="h-2.5 w-2.5" />{(elapsed / 1000).toFixed(1)}s
+            </span>
+          )}
         </div>
-        <StatusPill running={running} done={done} ok={ok} />
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setAutoScroll(a => !a)}
+            className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${autoScroll ? 'border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10' : 'border-border/60 text-muted-foreground hover:text-foreground'}`}
+            title={autoScroll ? '自动滚动中，点击暂停' : '已暂停，点击恢复'}
+          >
+            {autoScroll ? '⤓ auto' : '⏸ paused'}
+          </button>
+          <StatusPill running={running} done={done} ok={ok} />
+        </div>
       </div>
 
       {/* progress bar with percentage label */}
@@ -232,11 +259,13 @@ function StreamFeed({
         <div className="px-3 pt-2.5 pb-1.5">
           <div className="flex items-center justify-between mb-1">
             <span className="text-[9px] font-mono text-muted-foreground tabular-nums">
-              {lastProgress < 100 ? 'processing' : 'complete'}
+              {lastProgress < 100 ? 'processing' : 'complete'} · {lastProgress}%
             </span>
-            <span className={`text-[10px] font-mono font-semibold tabular-nums ${done ? (ok ? 'text-emerald-500' : 'text-rose-500') : 'text-sky-500'}`}>
-              {lastProgress}%
-            </span>
+            {done && (
+              <span className={`text-[10px] font-mono font-semibold tabular-nums ${ok ? 'text-emerald-500' : 'text-rose-500'}`}>
+                {ok ? '✓' : '✗'} {(elapsed / 1000).toFixed(1)}s
+              </span>
+            )}
           </div>
           <div className="relative h-1.5 rounded-full bg-muted overflow-hidden">
             <motion.div
@@ -538,7 +567,11 @@ export function SettingsRunPanel() {
   const [logs, setLogs] = useState<RunLog[]>([]);
   const [logFilter, setLogFilter] = useState<'all' | 'literature' | 'eval' | 'weekly'>('all');
   const [logSearch, setLogSearch] = useState('');
-  const [running, setRunning] = useState<string | null>(null);
+  /** Modules currently running — supports parallel execution. */
+  const [running, setRunning] = useState<Set<string>>(new Set());
+  const isRunning = (m: string) => running.has(m);
+  const markRunning = (m: string) => setRunning(s => new Set(s).add(m));
+  const markDone = (m: string) => setRunning(s => { const n = new Set(s); n.delete(m); return n; });
   const [scanning, setScanning] = useState(false);
 
   // ① Daily literature params
@@ -663,7 +696,7 @@ export function SettingsRunPanel() {
       ext = 'json';
     } else {
       content = [
-        `# Skills 面板执行日志`,
+        `# 运行中心执行日志`,
         ``,
         `导出时间：${new Date().toISOString()}`,
         `过滤：${logFilter} · 搜索："${logSearch}" · ${filtered.length} 条`,
@@ -686,14 +719,14 @@ export function SettingsRunPanel() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `skills-logs-${ts}.${ext}`;
+    a.download = `runcenter-logs-${ts}.${ext}`;
     a.click();
     URL.revokeObjectURL(url);
   };
 
   /* ── run triggers ───────────────────────────────────────────────────── */
   const runLiterature = () => {
-    setRunning('lit');
+    markRunning('lit');
     litStream.reset();
     log({ ts: new Date().toISOString(), module: 'literature', status: 'running', summary: `每日结构生物学文献 ${litDate} (±${litWindowDays}d) — SSE streaming…` });
     litStream.start('/api/literature/daily/run', {
@@ -709,7 +742,7 @@ export function SettingsRunPanel() {
 
   const runEvaluation = () => {
     const uid = evalUniprot.trim().toUpperCase();
-    setRunning('eval');
+    markRunning('eval');
     evalStream.reset();
     log({ ts: new Date().toISOString(), module: 'eval', status: 'running', summary: `评估 ${uid} — SSE streaming…` });
     evalStream.start('/api/evaluations/run', {
@@ -724,7 +757,7 @@ export function SettingsRunPanel() {
   };
 
   const runWeekly = (maxCycles: 1 | 2 | 3) => {
-    setRunning('weekly');
+    markRunning('weekly');
     weeklyStream.reset();
     log({ ts: new Date().toISOString(), module: 'weekly', status: 'running', summary: `触发本周 PDB 周报 (${weeklyWindow?.weekId || '?'}) • ${maxCycles}-cycle • SSE stream active… (预计 5–15 min)` });
     weeklyStream.start('/api/pdb-weekly/run', { maxCycles, llm: llmBody() });
@@ -752,7 +785,7 @@ export function SettingsRunPanel() {
     } else if (s.error) {
       log({ ts: new Date().toISOString(), module: 'literature', status: 'error', summary: s.error });
     }
-    setRunning(null);
+    markDone('lit');
      
   }, [litStream.state.done]);
 
@@ -779,7 +812,7 @@ export function SettingsRunPanel() {
     } else if (s.error) {
       log({ ts: new Date().toISOString(), module: 'eval', status: 'error', summary: s.error });
     }
-    setRunning(null);
+    markDone('eval');
      
   }, [evalStream.state.done]);
 
@@ -827,7 +860,7 @@ export function SettingsRunPanel() {
     } else if (s.error) {
       log({ ts: new Date().toISOString(), module: 'weekly', status: 'error', summary: s.error });
     }
-    setRunning(null);
+    markDone('weekly');
      
   }, [weeklyStream.state.done]);
 
@@ -841,10 +874,15 @@ export function SettingsRunPanel() {
         <Button
           variant="outline"
           size="sm"
-          className="h-8 gap-1.5 text-xs font-medium border-border/60 hover:border-primary/40 hover:bg-accent/50 transition-all"
+          className="h-8 gap-1.5 text-xs font-medium border-border/60 hover:border-primary/40 hover:bg-accent/50 transition-all relative"
         >
           <Settings2 className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Skills</span>
+          <span className="hidden sm:inline">运行中心</span>
+          {running.size > 0 && (
+            <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sky-500 text-white text-[8px] font-bold px-1">
+              {running.size}
+            </span>
+          )}
         </Button>
       </DialogTrigger>
 
@@ -857,15 +895,19 @@ export function SettingsRunPanel() {
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-primary/15 to-primary/5 border border-primary/20">
                 <Sparkles className="h-4.5 w-4.5 text-primary" />
               </div>
-              <span>Skills &amp; 手动执行</span>
+              <span>运行中心</span>
               <Badge variant="outline" className="ml-1 text-[10px] font-normal text-muted-foreground border-border/60">
                 <Layers className="h-2.5 w-2.5 mr-1" /> 3 modules
               </Badge>
+              {running.size > 0 && (
+                <Badge variant="outline" className="ml-1 text-[10px] font-normal bg-sky-500/10 text-sky-600 dark:text-sky-300 border-sky-500/30 gap-1">
+                  <Loader2 className="h-2.5 w-2.5 animate-spin" /> {running.size} running
+                </Badge>
+              )}
             </DialogTitle>
             <DialogDescription className="text-xs leading-relaxed pt-1">
-              复刻自 <code className="px-1 py-0.5 rounded bg-muted/60 font-mono text-[10px]">literature-daily</code> /{' '}
-              <code className="px-1 py-0.5 rounded bg-muted/60 font-mono text-[10px]">protein-target-evaluator</code> skill 的后端逻辑。
-              三个模块都支持手动触发，自动检测本机 LLM CLI（hermes / claude / codex）或通过 Anthropic / OpenAI SDK 调用。
+              结构生物学智能任务中心 — 每日文献检索、蛋白靶点评估、PDB 周报生成三个模块。
+              支持并行触发，SSE 实时推送进度与日志，运行中可切换其他模块操作。自动检测 LLM CLI（hermes / claude / codex）或通过 Anthropic / OpenAI / z-ai SDK 调用。
             </DialogDescription>
           </DialogHeader>
         </div>
@@ -1024,19 +1066,19 @@ export function SettingsRunPanel() {
                 <BookOpen className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">① 文献</span>
                 <span className="sm:hidden">①</span>
-                {running === 'lit' && <Loader2 className="h-3 w-3 animate-spin text-sky-500" />}
+                {isRunning('lit') && <Loader2 className="h-3 w-3 animate-spin text-sky-500" />}
               </TabsTrigger>
               <TabsTrigger value="evaluation" className="text-xs gap-1.5">
                 <FlaskConical className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">② 评估</span>
                 <span className="sm:hidden">②</span>
-                {running === 'eval' && <Loader2 className="h-3 w-3 animate-spin text-sky-500" />}
+                {isRunning('eval') && <Loader2 className="h-3 w-3 animate-spin text-sky-500" />}
               </TabsTrigger>
               <TabsTrigger value="weekly" className="text-xs gap-1.5">
                 <CalendarClock className="h-3.5 w-3.5" />
                 <span className="hidden sm:inline">③ 周报</span>
                 <span className="sm:hidden">③</span>
-                {running === 'weekly' && <Loader2 className="h-3 w-3 animate-spin text-sky-500" />}
+                {isRunning('weekly') && <Loader2 className="h-3 w-3 animate-spin text-sky-500" />}
               </TabsTrigger>
             </TabsList>
 
@@ -1074,8 +1116,8 @@ export function SettingsRunPanel() {
                     仅 DB（不写 LLM-Wiki 文件）
                   </label>
                   <RunButton
-                    running={running === 'lit'}
-                    disabled={running !== null && running !== 'lit'}
+                    running={isRunning('lit')}
+                    
                     onClick={runLiterature}
                   />
                 </div>
@@ -1151,8 +1193,8 @@ export function SettingsRunPanel() {
                   <ToggleChip checked={evalForceBlast} onCheckedChange={setEvalForceBlast} label="forceBlast" />
                   <ToggleChip checked={evalSkipBlast} onCheckedChange={setEvalSkipBlast} label="skipBlast" />
                   <RunButton
-                    running={running === 'eval'}
-                    disabled={running !== null && running !== 'eval'}
+                    running={isRunning('eval')}
+                    
                     onClick={runEvaluation}
                   />
                 </div>
@@ -1249,13 +1291,13 @@ export function SettingsRunPanel() {
                   </div>
 
                   <RunButton
-                    running={running === 'weekly'}
-                    disabled={running !== null && running !== 'weekly'}
+                    running={isRunning('weekly')}
+                    
                     onClick={() => runWeekly(weeklyCycles)}
-                    label={running === 'weekly' ? '运行中…' : '立即触发'}
+                    label={isRunning('weekly') ? '运行中…' : '立即触发'}
                   />
 
-                  {running === 'weekly' && (
+                  {isRunning('weekly') && (
                     <Button
                       onClick={() => weeklyStream.cancel()}
                       variant="outline"
@@ -1277,7 +1319,7 @@ export function SettingsRunPanel() {
                 <CycleTimeline
                   events={weeklyStream.state.log}
                   maxCycles={weeklyCycles}
-                  running={running === 'weekly'}
+                  running={isRunning('weekly')}
                   result={weeklyStream.state.result}
                 />
 
@@ -1414,7 +1456,7 @@ export function SettingsRunPanel() {
           </a>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground/60">
             <ShieldCheck className="h-3 w-3" />
-            <span>SSE streaming · atomic LLM report · auto provider detect</span>
+            <span>SSE 实时流式 · 并行执行 · 自动 provider 检测 · z-ai LLM</span>
           </div>
         </div>
       </DialogContent>
