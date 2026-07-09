@@ -87,3 +87,46 @@
 - `original-ui-restored.png` — 原 PDB Tracker 完整 dashboard（验证 UI 已恢复）
 - `original-ui-skills-popup-module2.png` — Skills 弹窗模块②真实 LLM 报告完成
 - `original-literature-tab.png` — 原 Literature 模式
+
+---
+
+## 第 3 轮迭代（持续优化 Skills 弹窗）
+
+### 本轮目标
+在第 2 轮"原 UI 已恢复 + Skills 弹窗优化版"基础上，继续在 Skills 弹窗**内部**增加功能与细节，不触碰任何原项目界面。
+
+### 已完成的新增功能
+
+| 功能 | 说明 |
+|------|------|
+| **LLM 报告内联预览（模块②）** | 新增 `LLMPreview` 组件，把真实 z-ai 生成的可行性报告以 Markdown 渲染（`LazyMarkdown`），可折叠、可复制原文，显示 provider/model/chars/耗时/fallback 徽章 |
+| **LLM 摘要内联预览（模块①）** | 同一 `LLMPreview` 组件用于模块①的每日精选摘要，sky 配色 |
+| **CycleTimeline 数据气泡（模块③）** | Generator/Critic/Synthesis 每阶段卡片显示 `耗时 + chars(k) + 事件数`，运行中显示 spinner，完成显示 ✓ + verdict |
+| **执行日志导出** | 日志区头部新增「导出 Markdown」「导出 JSON」两个按钮，按当前过滤/搜索结果导出文件下载 |
+| **lint 修复** | eslint 忽略 `src/components.old/`、`src/hooks.old/`、`src/lib.old/`（原项目备份目录，未被引用），lint 现在 0 error |
+
+### 验证结果（agent-browser 端到端）
+
+| 验证项 | 结果 |
+|--------|------|
+| 原 PDB Structure Tracker dashboard 完好 | ✅ |
+| Skills 弹窗模块② 执行 → LLM 报告内联 Markdown 预览 | ✅ "LLM 可行性报告 · EGFR" 标题 + 完整中文报告（概述/可成药性/综合建议），422 chars / 4.0s |
+| Skills 弹窗模块① 执行 → LLM 摘要内联 Markdown 预览 | ✅ "LLM 每日精选摘要 · 2026-07-09" + 完整摘要（GPCR/激酶/核糖体/SARS-CoV-2），298 chars / 3.5s |
+| Skills 弹窗模块③ Cycle Orchestration | ✅ "CYCLE ORCHESTRATION" + Generator 卡片显示 "初版周报生成 / 5.9k / ev" |
+| 执行日志导出按钮 | ✅ 「导出 Markdown」「导出 JSON」「清空」三按钮均可见 |
+| 控制台错误 | ✅ 0 |
+| `bun run lint` | ✅ 0 error / 0 warning |
+
+### 新增截图
+- `skills-llm-report-preview.png` — 模块② LLM 报告 Markdown 内联预览
+- `skills-llm-digest-preview.png` — 模块① LLM 摘要 Markdown 内联预览
+- `skills-cycle-timeline.png` — 模块③ Cycle Orchestration 时间轴
+
+### 已知稳定性风险
+- **dev server 偶发退出**：molstar + webpack 编译较重，连续多次 SSE+LLM 调用后进程偶发被沙箱 OOM 终止（dev.log 无报错，进程直接消失）。重启 `bun run dev` 即恢复。不影响功能正确性，仅影响长时间连续测试。
+
+### 下一阶段建议优先事项
+1. **移动端 Skills 弹窗细节** — 小屏 tab 横向滚动、日志区默认折叠、LLM 预览高度自适应。
+2. **LLM 预览增强** — 报告内嵌"再生成"按钮、复制为纯文本/Markdown 切换。
+3. **CycleTimeline 进度** — 运行中显示当前 cycle 的实时进度百分比。
+4. **dev server 稳定性** — 考虑给 SSE mock 端点降低并发或加 timeout 保护。

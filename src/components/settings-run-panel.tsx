@@ -47,6 +47,7 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { LazyMarkdown } from '@/components/lazy-markdown';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   BookOpen,
@@ -71,6 +72,12 @@ import {
   Lock,
   Layers,
   Search,
+  Copy,
+  Check,
+  AlertTriangle,
+  FileDown,
+  Download,
+  Clock,
 } from 'lucide-react';
 
 /* ──────────────────────────────────────────────────────────────────────── */
@@ -319,6 +326,104 @@ function StageTimeline({ events }: { events: StreamEvent[] }) {
   );
 }
 
+/**
+ * LLMPreview — collapsible inline preview of real LLM-generated content
+ * (module ② report / module ① digest). Renders Markdown, shows fallback
+ * warning when the LLM SDK failed, and lets the user copy the raw text.
+ */
+function LLMPreview({
+  content,
+  title,
+  provider,
+  model,
+  durationMs,
+  fallback,
+  chars,
+  accent = 'emerald',
+}: {
+  content?: string;
+  title: string;
+  provider?: string;
+  model?: string;
+  durationMs?: number;
+  fallback?: boolean;
+  chars?: number;
+  accent?: 'emerald' | 'sky';
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [copied, setCopied] = useState(false);
+
+  if (!content) return null;
+
+  const accentMap = {
+    emerald: { ring: 'border-emerald-500/30', bg: 'from-emerald-500/5', icon: 'text-emerald-500', badge: 'border-emerald-500/30 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10' },
+    sky: { ring: 'border-sky-500/30', bg: 'from-sky-500/5', icon: 'text-sky-500', badge: 'border-sky-500/30 text-sky-600 dark:text-sky-300 bg-sky-500/10' },
+  };
+  const a = accentMap[accent];
+
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch { /* ignore */ }
+  };
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className={`mt-3 rounded-lg border ${a.ring} bg-gradient-to-br ${a.bg} via-transparent to-transparent overflow-hidden`}
+    >
+      {/* header */}
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/40 bg-background/40">
+        <button
+          type="button"
+          onClick={() => setExpanded(e => !e)}
+          className="flex items-center gap-2 min-w-0 flex-1"
+        >
+          <FileText className={`h-3.5 w-3.5 ${a.icon} shrink-0`} />
+          <span className="text-xs font-semibold truncate">{title}</span>
+          {fallback && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-amber-500/40 text-amber-600 dark:text-amber-300 bg-amber-500/10 gap-0.5 shrink-0">
+              <AlertTriangle className="h-2.5 w-2.5" /> fallback
+            </Badge>
+          )}
+          <Badge variant="outline" className={`text-[9px] px-1 py-0 h-4 ${a.badge} gap-0.5 shrink-0`}>
+            <Sparkles className="h-2.5 w-2.5" /> {provider}/{model}
+          </Badge>
+          {chars != null && <span className="text-[9px] text-muted-foreground/60 font-mono shrink-0">{chars} chars</span>}
+          {durationMs != null && <span className="text-[9px] text-muted-foreground/60 font-mono shrink-0 hidden sm:inline">{(durationMs / 1000).toFixed(1)}s</span>}
+        </button>
+        <div className="flex items-center gap-1 shrink-0">
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={copy} title="复制原文">
+            {copied ? <Check className="h-3 w-3 text-emerald-500" /> : <Copy className="h-3 w-3" />}
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setExpanded(e => !e)}>
+            <ChevronDown className={`h-3 w-3 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+          </Button>
+        </div>
+      </div>
+      {/* body */}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="px-3 py-2 max-h-72 overflow-y-auto thin-scroll text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+              <LazyMarkdown>{content}</LazyMarkdown>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}
+
 /* ──────────────────────────────────────────────────────────────────────── */
 /*  Main component                                                           */
 /* ──────────────────────────────────────────────────────────────────────── */
@@ -345,13 +450,17 @@ function CycleTimeline({
     { key: 'synthesis', label: 'Synthesis', desc: '综合终稿', color: 'emerald' },
   ].slice(0, maxCycles);
 
-  // Derive per-role status from the event stream.
+  // Derive per-role status from the event stream + result payload.
   const roleStatus = roles.map((r) => {
     const roleEvents = events.filter(e => (e.stage || '').includes(r.key));
     const started = roleEvents.length > 0;
-    const completed = roleEvents.some(e => e.level === 'success') || (result?.cycles?.some((c: any) => c.role === r.key));
-    const verdict = result?.cycles?.find((c: any) => c.role === r.key)?.verdict;
-    return { ...r, started, completed, verdict, eventCount: roleEvents.length };
+    const cycleResult = result?.cycles?.find((c: any) => c.role === r.key);
+    const completed = roleEvents.some(e => e.level === 'success') || !!cycleResult;
+    const verdict = cycleResult?.verdict;
+    const durationMs = cycleResult?.durationMs;
+    const contentChars = cycleResult?.contentChars;
+    const reportType = cycleResult?.reportType;
+    return { ...r, started, completed, verdict, durationMs, contentChars, reportType, eventCount: roleEvents.length };
   });
 
   const hasAnyActivity = roleStatus.some(r => r.started);
@@ -394,8 +503,16 @@ function CycleTimeline({
                   )}
                 </div>
                 <div className="text-[9px] text-muted-foreground truncate">{r.desc}</div>
-                <div className="text-[9px] font-mono text-muted-foreground/60 mt-0.5">
-                  {r.completed ? `${r.eventCount} events` : r.started ? 'running…' : 'pending'}
+                <div className="text-[9px] font-mono text-muted-foreground/60 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                  {r.completed ? (
+                    <>
+                      <span className="flex items-center gap-0.5"><Clock className="h-2 w-2" />{((r.durationMs || 0) / 1000).toFixed(1)}s</span>
+                      {r.contentChars != null && <span className="flex items-center gap-0.5"><FileText className="h-2 w-2" />{r.contentChars > 1000 ? `${(r.contentChars / 1000).toFixed(1)}k` : r.contentChars}</span>}
+                      <span>· {r.eventCount}ev</span>
+                    </>
+                  ) : r.started ? (
+                    <span className="flex items-center gap-0.5"><Loader2 className="h-2 w-2 animate-spin" />running…</span>
+                  ) : 'pending'}
                 </div>
               </div>
               {!isLast && (
@@ -529,6 +646,50 @@ export function SettingsRunPanel() {
   useEffect(() => { persistCfg(llmCfg); }, [llmCfg]);
 
   const log = (entry: RunLog) => setLogs(l => [entry, ...l].slice(0, 50));
+
+  /** Export the current (filtered) logs as a Markdown file download. */
+  const exportLogs = (format: 'md' | 'json') => {
+    const filtered = logs
+      .filter(l => logFilter === 'all' || l.module === logFilter)
+      .filter(l => !logSearch || l.summary.toLowerCase().includes(logSearch.toLowerCase()) || (l.details || '').toLowerCase().includes(logSearch.toLowerCase()));
+    if (filtered.length === 0) return;
+    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
+    let content: string;
+    let mime: string;
+    let ext: string;
+    if (format === 'json') {
+      content = JSON.stringify(filtered, null, 2);
+      mime = 'application/json';
+      ext = 'json';
+    } else {
+      content = [
+        `# Skills 面板执行日志`,
+        ``,
+        `导出时间：${new Date().toISOString()}`,
+        `过滤：${logFilter} · 搜索："${logSearch}" · ${filtered.length} 条`,
+        ``,
+        `---`,
+        ``,
+        ...filtered.map((l, i) => [
+          `## ${i + 1}. [${l.module}] ${l.status} · ${l.ts}`,
+          ``,
+          `**摘要**：${l.summary}`,
+          l.durationMs != null ? `` : ``,
+          ...(l.details ? [``, `### 详情`, ``, '```', l.details, '```'] : []),
+          ``,
+        ].filter(Boolean).join('\n')),
+      ].join('\n');
+      mime = 'text/markdown';
+      ext = 'md';
+    }
+    const blob = new Blob([content], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `skills-logs-${ts}.${ext}`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   /* ── run triggers ───────────────────────────────────────────────────── */
   const runLiterature = () => {
@@ -927,6 +1088,20 @@ export function SettingsRunPanel() {
                   emptyHint="点击「执行」启动 PubMed 双路径检索 + LLM 摘要流水线"
                 />
 
+                {/* LLM digest inline preview (module ①) */}
+                {litStream.state.done && litStream.state.result?.digest && (
+                  <LLMPreview
+                    content={litStream.state.result.digest}
+                    title={`LLM 每日精选摘要 · ${litStream.state.result.date}`}
+                    provider={litStream.state.result.provider}
+                    model={litStream.state.result.model}
+                    durationMs={undefined}
+                    fallback={litStream.state.result.llmFallback}
+                    chars={litStream.state.result.digest.length}
+                    accent="sky"
+                  />
+                )}
+
                 {litExistingReports.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-border/40">
                     <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
@@ -989,6 +1164,20 @@ export function SettingsRunPanel() {
                   ok={evalStream.state.ok}
                   emptyHint="输入 UniProt ID 并点击「执行」启动评估流水线"
                 />
+
+                {/* LLM report inline preview (module ②) */}
+                {evalStream.state.done && evalStream.state.result?.report?.content && (
+                  <LLMPreview
+                    content={evalStream.state.result.report.content}
+                    title={`LLM 可行性报告 · ${evalStream.state.result.uniprotInfo?.proteinName || evalStream.state.result.uniprot}`}
+                    provider={evalStream.state.result.report.provider}
+                    model={evalStream.state.result.report.model}
+                    durationMs={evalStream.state.result.report.durationMs}
+                    fallback={evalStream.state.result.report.fallback}
+                    chars={evalStream.state.result.report.contentChars}
+                    accent="emerald"
+                  />
+                )}
 
                 <div className="mt-3 flex items-center gap-3 flex-wrap">
                   <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer">
@@ -1155,6 +1344,12 @@ export function SettingsRunPanel() {
                           className="w-16 bg-transparent text-[10px] outline-none placeholder:text-muted-foreground/50"
                         />
                       </div>
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => exportLogs('md')} title="导出 Markdown" disabled={logs.length === 0}>
+                        <FileDown className="h-3 w-3" />
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => exportLogs('json')} title="导出 JSON" disabled={logs.length === 0}>
+                        <Download className="h-3 w-3" />
+                      </Button>
                       <Button variant="ghost" size="sm" className="h-6 text-[10px] text-muted-foreground px-2" onClick={() => setLogs([])}>
                         清空
                       </Button>
