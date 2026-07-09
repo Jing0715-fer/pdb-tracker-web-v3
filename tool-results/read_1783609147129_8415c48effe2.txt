@@ -1,0 +1,914 @@
+     1→'use client';
+     2→
+     3→/**
+     4→ * Settings & Run Panel — manual triggers for the three ported skills.
+     5→ *
+     6→ *   1. Structure-Biology Daily Literature Report
+     7→ *      → POST /api/literature/daily/run
+     8→ *
+     9→ *   2. Target Evaluation (UniProt → UniProt + RCSB + BLAST) + LLM Report
+    10→ *      → POST /api/evaluations/run
+    11→ *      (the standalone "③ 仅重新生成 LLM 报告" module was removed because
+    12→ *      this evaluator already includes an atomic LLM report step via the
+    13→ *      `generateReport` checkbox)
+    14→ *
+    15→ *   3. Manual PDB Weekly Report (Cryo-EM + X-ray)
+    16→ *      → POST /api/pdb-weekly/run (in-process 2-step adversarial pipeline)
+    17→ *      SSE progress streaming via text/event-stream
+    18→ *      (Wednesday 08:00 Beijing cron job retained as fallback)
+    19→ *
+    20→ * LLM config (provider / apiKey / baseUrl / model / system) is shared across
+    21→ * the literature / evaluation modules. The weekly report uses the OpenClaw
+    22→ * agent's own model (see cron job 7c26ab96-...).
+    23→ */
+    24→
+    25→import React, { useEffect, useState, useCallback, useRef } from 'react';
+    26→import { Button } from '@/components/ui/button';
+    27→import { Input } from '@/components/ui/input';
+    28→import { Label } from '@/components/ui/label';
+    29→import { useRunStream } from '@/lib/use-run-stream';
+    30→import {
+    31→  Dialog,
+    32→  DialogContent,
+    33→  DialogDescription,
+    34→  DialogHeader,
+    35→  DialogTitle,
+    36→  DialogTrigger,
+    37→  DialogFooter,
+    38→} from '@/components/ui/dialog';
+    39→import {
+    40→  BookOpen,
+    41→  FlaskConical,
+    42→  Sparkles,
+    43→  Settings,
+    44→  Play,
+    45→  Loader2,
+    46→  CheckCircle2,
+    47→  XCircle,
+    48→  ExternalLink,
+    49→  RefreshCw,
+    50→  CalendarClock,
+    51→} from 'lucide-react';
+    52→
+    53→interface LlmInfo {
+    54→  env: {
+    55→    provider?: string;
+    56→    apiKey?: string;
+    57→    baseUrl?: string;
+    58→    model?: string;
+    59→  };
+    60→  chosen: string;
+    61→  available: Array<{ provider: string; bin?: string; reason: string; label?: string }>;
+    62→  totalClisScanned: number;
+    63→}
+    64→
+    65→interface LlmUserConfig {
+    66→  provider: string;
+    67→  apiKey: string;
+    68→  baseUrl: string;
+    69→  model: string;
+    70→  system: string;
+    71→}
+    72→
+    73→interface RunLog {
+    74→  ts: string;
+    75→  module: 'literature' | 'eval' | 'report' | 'weekly';
+    76→  status: 'running' | 'success' | 'error';
+    77→  summary: string;
+    78→  details?: string;
+    79→  durationMs?: number;
+    80→}
+    81→
+    82→const DEFAULT_LLM_CFG: LlmUserConfig = {
+    83→  provider: '',
+    84→  apiKey: '',
+    85→  baseUrl: '',
+    86→  model: '',
+    87→  system: '',
+    88→};
+    89→
+    90→const STORAGE_KEY = 'pdb-tracker:llm-cfg:v1';
+    91→const STORAGE_PROVIDER_KEY = 'pdb-tracker:llm-provider:v1';
+    92→
+    93→/** Sentinel value: the user wants the orchestrator to pick the best provider
+    94→ *  based on what the server detected (this is the default behavior). */
+    95→const AUTO_PROVIDER = '__auto__';
+    96→
+    97→function loadStoredProvider(): string {
+    98→  if (typeof window === 'undefined') return AUTO_PROVIDER;
+    99→  try { return localStorage.getItem(STORAGE_PROVIDER_KEY) || AUTO_PROVIDER; } catch { return AUTO_PROVIDER; }
+   100→}
+   101→
+   102→function loadStoredCfg(): LlmUserConfig {
+   103→  if (typeof window === 'undefined') return DEFAULT_LLM_CFG;
+   104→  try {
+   105→    const raw = localStorage.getItem(STORAGE_KEY);
+   106→    if (!raw) return DEFAULT_LLM_CFG;
+   107→    return { ...DEFAULT_LLM_CFG, ...JSON.parse(raw) };
+   108→  } catch { return DEFAULT_LLM_CFG; }
+   109→}
+   110→
+   111→function persistProvider(p: string) {
+   112→  try { localStorage.setItem(STORAGE_PROVIDER_KEY, p); } catch {/* ignore */}
+   113→}
+   114→
+   115→function persistCfg(c: LlmUserConfig) {
+   116→  try {
+   117→    // Don't persist apiKey in plain localStorage in production — but for
+   118→    // this internal tool it's OK. (In a real deploy, use a server-side
+   119→    // session and reference it by token here.)
+   120→    localStorage.setItem(STORAGE_KEY, JSON.stringify(c));
+   121→  } catch {/* ignore */}
+   122→}
+   123→
+   124→export function SettingsRunPanel() {
+   125→  const [open, setOpen] = useState(false);
+   126→  const [llmInfo, setLlmInfo] = useState<LlmInfo | null>(null);
+   127→  // The user's *explicit* provider choice. '' / '__auto__' means "use what
+   128→  // the server picks" (default). Anything else (e.g. 'cli:hermes',
+   129→  // 'anthropic', 'cli:claude') is sent as-is to the LLM endpoints.
+   130→  // Initialized lazily from localStorage so we don't need a mount effect.
+   131→  const [chosenProvider, setChosenProvider] = useState<string>(() => loadStoredProvider());
+   132→  const [llmCfg, setLlmCfg] = useState<LlmUserConfig>(() => loadStoredCfg());
+   133→  const [showLlmCfg, setShowLlmCfg] = useState(false);
+   134→  const [logs, setLogs] = useState<RunLog[]>([]);
+   135→  const [running, setRunning] = useState<string | null>(null);
+   136→
+   137→  // Daily literature params
+   138→  const [litDate, setLitDate] = useState(new Date().toISOString().slice(0, 10));
+   139→  const [litWindowDays, setLitWindowDays] = useState(3);
+   140→  const [litMaxPathA, setLitMaxPathA] = useState(300);
+   141→  const [litMaxPathB, setLitMaxPathB] = useState(50);
+   142→  const [litMaxPapers, setLitMaxPapers] = useState(20);
+   143→  const [litSkipWikiFiles, setLitSkipWikiFiles] = useState(false);
+   144→  const [litExistingReports, setLitExistingReports] = useState<Array<{ date: string; paperCount: number; hasLLMDigest: boolean }>>([]);
+   145→
+   146→  // Eval params
+   147→  const [evalUniprot, setEvalUniprot] = useState('P00533');
+   148→  const [evalForceBlast, setEvalForceBlast] = useState(false);
+   149→  const [evalSkipBlast, setEvalSkipBlast] = useState(true);
+   150→  const [evalMaxPdb, setEvalMaxPdb] = useState(80);
+   151→  const [evalGenerateReport, setEvalGenerateReport] = useState(true);
+   152→  const [evalSaveReportFile, setEvalSaveReportFile] = useState(true);
+   153→
+   154→  // Weekly report state
+   155→  const [weeklyWindow, setWeeklyWindow] = useState<{
+   156→    weekId: string; reportDate: string; startDate: string; endDate: string;
+   157→  } | null>(null);
+   158→  const [weeklyDbCounts, setWeeklyDbCounts] = useState<{
+   159→    pdbStructure: number; weeklySnapshot: number; weeklyReport: number;
+   160→  } | null>(null);
+   161→  const weeklyStream = useRunStream();
+   162→  const weeklyStreamRef = useRef(weeklyStream);
+   163→  weeklyStreamRef.current = weeklyStream;
+   164→
+   165→  // SSE stream hooks for ① literature and ② evaluation
+   166→  const litStream = useRunStream();
+   167→  const evalStream = useRunStream();
+   168→
+   169→  // Load LLM provider info on open + load existing reports list + weekly status
+   170→  useEffect(() => {
+   171→    if (!open) return;
+   172→    if (!llmInfo) {
+   173→      fetch('/api/llm/providers')
+   174→        .then(r => r.json())
+   175→        .then((d: LlmInfo) => {
+   176→          setLlmInfo(d);
+   177→          setLlmCfg(prev => {
+   178→            if (prev.provider) return prev;
+   179→            return {
+   180→              ...prev,
+   181→              provider: prev.provider || d.chosen || '',
+   182→              model: prev.model || d.env.model || '',
+   183→              baseUrl: prev.baseUrl || d.env.baseUrl || '',
+   184→            };
+   185→          });
+   186→        })
+   187→        .catch(() => {/* ignore */});
+   188→    }
+   189→    // Also fetch the existing reports list once.
+   190→    if (litExistingReports.length === 0) {
+   191→      fetch('/api/literature/daily/list')
+   192→        .then(r => r.json())
+   193→        .then((d: any) => setLitExistingReports(d.reports || []))
+   194→        .catch(() => {/* ignore */});
+   195→    }
+   196→    // And the weekly report window + current DB row counts.
+   197→    if (!weeklyWindow) {
+   198→      fetch('/api/pdb-weekly/run', { method: 'GET' })
+   199→        .then(r => r.json())
+   200→        .then((d: any) => {
+   201→          if (d && d.weekId) {
+   202→            setWeeklyWindow({
+   203→              weekId: d.weekId, reportDate: d.reportDate,
+   204→              startDate: d.startDate, endDate: d.endDate,
+   205→            });
+   206→          }
+   207→          if (d?.dbCounts) setWeeklyDbCounts(d.dbCounts);
+   208→        })
+   209→        .catch(() => {/* ignore */});
+   210→    }
+   211→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   212→  }, [open, llmInfo, litExistingReports.length]);
+   213→
+   214→  /**
+   215→   * User picked a provider from the list. We:
+   216→   *   1. persist the choice in localStorage
+   217→   *   2. update local state
+   218→   *   3. sync llmCfg.provider so it goes out in the next run's body
+   219→   */
+   220→  const pickProvider = (providerId: string) => {
+   221→    setChosenProvider(providerId);
+   222→    persistProvider(providerId);
+   223→    if (providerId === AUTO_PROVIDER) {
+   224→      // Clear explicit override but keep apiKey / baseUrl / model.
+   225→      setLlmCfg(prev => ({ ...prev, provider: '' }));
+   226→    } else {
+   227→      setLlmCfg(prev => ({ ...prev, provider: providerId }));
+   228→    }
+   229→  };
+   230→
+   231→  // The effective provider id that the badge displays:
+   232→  //   - AUTO  → server's `chosen` (the actual provider that ran last)
+   233→  //   - pin   → whatever the user explicitly picked
+   234→  const effectiveProviderId = chosenProvider === AUTO_PROVIDER
+   235→    ? (llmInfo?.chosen || '')
+   236→    : chosenProvider;
+   237→
+   238→  const llmBody = useCallback(() => {
+   239→    const out: any = {};
+   240→    // If user picked a specific provider (not AUTO), send it explicitly.
+   241→    // If AUTO, omit so the server uses its own detection / fallback chain.
+   242→    if (chosenProvider && chosenProvider !== AUTO_PROVIDER) {
+   243→      out.provider = chosenProvider;
+   244→    } else if (llmCfg.provider) {
+   245→      out.provider = llmCfg.provider;
+   246→    }
+   247→    if (llmCfg.apiKey) out.apiKey = llmCfg.apiKey;
+   248→    if (llmCfg.baseUrl) out.baseUrl = llmCfg.baseUrl;
+   249→    if (llmCfg.model) out.model = llmCfg.model;
+   250→    if (llmCfg.system) out.system = llmCfg.system;
+   251→    return Object.keys(out).length > 0 ? out : undefined;
+   252→  }, [chosenProvider, llmCfg]);
+   253→
+   254→  // Persist cfg changes whenever the user edits a field.
+   255→  useEffect(() => { persistCfg(llmCfg); }, [llmCfg]);
+   256→
+   257→  const log = (entry: RunLog) => setLogs(l => [entry, ...l].slice(0, 50));
+   258→
+   259→  const runLiterature = async () => {
+   260→    setRunning('lit');
+   261→    litStream.reset();
+   262→    log({ ts: new Date().toISOString(), module: 'literature', status: 'running', summary: `每日结构生物学文献 ${litDate} (±${litWindowDays}d) — SSE streaming…` });
+   263→    litStream.start('/api/literature/daily/run', {
+   264→      date: litDate,
+   265→      windowDays: litWindowDays,
+   266→      maxPathA: litMaxPathA,
+   267→      maxPathB: litMaxPathB,
+   268→      maxPapers: litMaxPapers,
+   269→      skipWikiFiles: litSkipWikiFiles,
+   270→      llm: llmBody(),
+   271→    });
+   272→  };
+   273→
+   274→  const runEvaluation = async () => {
+   275→    const uid = evalUniprot.trim().toUpperCase();
+   276→    setRunning('eval');
+   277→    evalStream.reset();
+   278→    log({ ts: new Date().toISOString(), module: 'eval', status: 'running', summary: `评估 ${uid} — SSE streaming…` });
+   279→    evalStream.start('/api/evaluations/run', {
+   280→      uniprot: uid,
+   281→      forceBlast: evalForceBlast,
+   282→      skipBlast: evalSkipBlast,
+   283→      maxPdb: evalMaxPdb,
+   284→      generateReport: evalGenerateReport,
+   285→      saveReportFile: evalSaveReportFile,
+   286→      llm: llmBody(),
+   287→    });
+   288→  };
+   289→
+   290→  const runReport = async () => {
+   291→    // Kept for backwards-compat in case anything else imports this name. No
+   292→    // longer used in the UI (the ③ 块 is the weekly report instead).
+   293→  };
+   294→
+   295→  // ── SSE completion hooks for ① literature ──────────────────────────────
+   296→  useEffect(() => {
+   297→    if (!litStream.state.done) return;
+   298→    const s = litStream.state;
+   299→    if (s.ok && s.result) {
+   300→      const d = s.result;
+   301→      log({
+   302→        ts: new Date().toISOString(),
+   303→        module: 'literature',
+   304→        status: 'success',
+   305→        summary: `${d.date}: 候选 ${d.totalCandidates} (Path A=${d.pathACount}, Path B=${d.pathBCount}) → 最终入选 ${d.finalCount} 篇 [${Object.entries(d.methodStats || {}).map(([m, c]: [string, any]) => `${m}:${c}`).join(', ')}]`,
+   306→        details: d.files?.dailyIndex ? `📁 ${d.files.dailyIndex}\n${d.digest ? `摘要:\n${d.digest.slice(0, 1500)}${d.digest.length > 1500 ? '…' : ''}` : ''}` : '无文件系统输出 (skipWikiFiles)',
+   307→        durationMs: d.durationMs,
+   308→      });
+   309→      fetch('/api/literature/daily/list')
+   310→        .then(r => r.json())
+   311→        .then((d: any) => setLitExistingReports(d.reports || []))
+   312→        .catch(() => {/* ignore */});
+   313→    } else if (s.error) {
+   314→      log({ ts: new Date().toISOString(), module: 'literature', status: 'error', summary: s.error || 'failed' });
+   315→    }
+   316→    setRunning(null);
+   317→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   318→  }, [litStream.state.done]);
+   319→
+   320→  // ── SSE completion hooks for ② evaluation ──────────────────────────────
+   321→  useEffect(() => {
+   322→    if (!evalStream.state.done) return;
+   323→    const s = evalStream.state;
+   324→    if (s.ok && s.result) {
+   325→      const d = s.result;
+   326→      const uid = d.uniprot || '';
+   327→      const repInfo = d.report
+   328→        ? (d.report.ok
+   329→            ? ` + 报告 ${d.report.savedToFile ? `已落盘 ${d.report.filename}` : '已生成'} (${d.report.provider}/${d.report.model}, ${Math.round((d.report.durationMs || 0) / 100) / 10}s)`
+   330→            : ` ⚠️ 报告生成失败: ${d.report.error}`)
+   331→        : ' (跳过报告)';
+   332→      log({
+   333→        ts: new Date().toISOString(),
+   334→        module: 'eval',
+   335→        status: d.report && !d.report.ok && evalGenerateReport ? 'error' : 'success',
+   336→        summary: `${d.uniprotInfo?.proteinName || uid}: direct=${d.directPdbCount}, blast=${d.blastHitCount}, cov=${d.coverage}%, overall=${d.scores.overall?.score}/10${repInfo}`,
+   337→        details: `Scores: X-ray ${d.scores.xray?.score}, Cryo-EM ${d.scores.cryoem?.score}, NMR ${d.scores.nmr?.score}${d.skippedBblast ? ' (BLAST skipped)' : ''}`,
+   338→        durationMs: d.durationMs,
+   339→      });
+   340→    } else if (s.error) {
+   341→      log({ ts: new Date().toISOString(), module: 'eval', status: 'error', summary: s.error || 'failed' });
+   342→    }
+   343→    setRunning(null);
+   344→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   345→  }, [evalStream.state.done]);
+   346→
+   347→  /** Mirror weeklyStream events into the panel's persistent run log. */
+   348→  useEffect(() => {
+   349→    const s = weeklyStream.state;
+   350→    // When a new entry lands, mirror it into the shared log.
+   351→    if (s.log.length > 0) {
+   352→      const latest = s.log[s.log.length - 1];
+   353→      // Throttle: only emit one log entry per second to avoid spamming the panel.
+   354→      const summary = (latest.detail || latest.message || latest.stage || '').toString();
+   355→      if (!summary) return;
+   356→      // Track which we've already mirrored so we don't double-log.
+   357→      // (We use the entry's timestamp as the dedup key.)
+   358→      logRef.current?.(summary);
+   359→    }
+   360→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   361→  }, [weeklyStream.state.log.length]);
+   362→
+   363→  /** When the run finishes, push a single success/failure log entry. */
+   364→  useEffect(() => {
+   365→    if (!weeklyStream.state.done) return;
+   366→    const s = weeklyStream.state;
+   367→    if (s.ok && s.result) {
+   368→      const r = s.result;
+   369→      const cycles = r.cycles || [];
+   370→      const providers = [...new Set(cycles.map((c: any) => c.provider).filter(Boolean))].join(', ');
+   371→      const lastTs = s.log.length > 0 ? new Date(s.log[s.log.length - 1].ts).toISOString() : new Date().toISOString();
+   372→      log({
+   373→        ts: lastTs,
+   374→        module: 'weekly',
+   375→        status: 'success',
+   376→        summary: `完成 ${r.window?.weekId} (${(r.reports || []).join('+')}) • ${cycles.length} cycles • ${providers} • ${(r.durationMs / 1000).toFixed(0)}s`,
+   377→        details: [
+   378→          `DB 行数: PdbStructure=${r.dbCounts?.pdbStructure}, WeeklyReport=${r.dbCounts?.weeklyReport}, with_authors=${r.dbCounts?.withAuthors}/${r.dbCounts?.pdbStructure}, with_pubmedId=${r.dbCounts?.withPubmedId}/${r.dbCounts?.pdbStructure}, PubMedArticle.matched=${r.dbCounts?.pubmedArticleMatched}`,
+   379→          `Files:`,
+   380→          ...(r.filesWritten || []).map((f: string) => `  • ${f}`),
+   381→          `Cycles:`,
+   382→          ...cycles.map((c: any) => `  • C${c.cycle}${c.role === 'critic-scientific' ? ' (critic-sci)' : c.role === 'critic-analytical' ? ' (critic-ana)' : c.role === 'synthesis' ? ' (synthesis)' : ''} ${c.reportType} via ${c.provider}/${c.model} → ${((c.durationMs || 0) / 1000).toFixed(1)}s, ${c.contentChars || 0} chars${c.verdict ? `, verdict=${c.verdict}` : ''}`),
+   383→        ].join('\n'),
+   384→        durationMs: r.durationMs,
+   385→      });
+   386→      // Refresh the DB count box.
+   387→      fetch('/api/pdb-weekly/run', { method: 'GET' })
+   388→        .then(r => r.json())
+   389→        .then((d: any) => { if (d?.dbCounts) setWeeklyDbCounts(d.dbCounts); })
+   390→        .catch(() => {/* ignore */});
+   391→    } else if (s.error) {
+   392→      log({
+   393→        ts: new Date().toISOString(),
+   394→        module: 'weekly',
+   395→        status: 'error',
+   396→        summary: s.error || 'run failed',
+   397→      });
+   398→    }
+   399→    setRunning(null);
+   400→    // eslint-disable-next-line react-hooks/exhaustive-deps
+   401→  }, [weeklyStream.state.done]);
+   402→
+   403→  /** Use a ref to the latest `log` callback so the useEffect above can fire it. */
+   404→  const logRef = useRef<((summary: string) => void) | null>(null);
+   405→  logRef.current = (summary: string) => {
+   406→    log({
+   407→      ts: new Date().toISOString(),
+   408→      module: 'weekly',
+   409→      status: 'running',
+   410→      summary,
+   411→    });
+   412→  };
+   413→
+   414→  const runWeekly = async (maxCycles: 1 | 2 | 3) => {
+   415→    setRunning('weekly');
+   416→    weeklyStream.reset();
+   417→    log({
+   418→      ts: new Date().toISOString(),
+   419→      module: 'weekly',
+   420→      status: 'running',
+   421→      summary: `触发本周 PDB 周报 (${weeklyWindow?.weekId || '?'}) • ${maxCycles}-cycle • SSE stream active… (预计 5–15 min)`,
+   422→    });
+   423→    weeklyStream.start('/api/pdb-weekly/run', { maxCycles, llm: llmBody() });
+   424→  };
+   425→
+   426→  return (
+   427→    <Dialog open={open} onOpenChange={setOpen}>
+   428→      <DialogTrigger asChild>
+   429→        <Button
+   430→          variant="outline"
+   431→          size="sm"
+   432→          className="h-7 gap-1.5 text-xs border-claude-border dark:border-[#3d3832]"
+   433→          title="Settings & Run — 手动执行 skill 任务"
+   434→        >
+   435→          <Settings className="h-3.5 w-3.5" />
+   436→          <span className="hidden sm:inline">Skills</span>
+   437→        </Button>
+   438→      </DialogTrigger>
+   439→      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto bg-claude-bg dark:bg-[#1a1917] border-claude-border dark:border-[#3d3832]">
+   440→        <DialogHeader>
+   441→          <DialogTitle className="flex items-center gap-2">
+   442→            <Settings className="h-4 w-4" /> Skills & 手动执行
+   443→          </DialogTitle>
+   444→          <DialogDescription>
+   445→            复刻自 literature-daily / protein-target-evaluator skill 的后端逻辑。三个模块都支持手动触发，并自动检测本机 LLM CLI（hermes / claude / codex）或通过 Anthropic / OpenAI SDK 调用。
+   446→          </DialogDescription>
+   447→        </DialogHeader>
+   448→
+   449→        {/* LLM provider status */}
+   450→        <div className="rounded-lg border border-claude-border dark:border-[#3d3832] p-3 bg-claude-bg-elevated/40">
+   451→          <div className="flex items-center justify-between gap-2">
+   452→            <div className="text-xs text-claude-text-secondary">
+   453→              <span className="font-medium">LLM 提供方：</span>{' '}
+   454→              <code className="px-1.5 py-0.5 rounded bg-claude-border-light text-claude-text">
+   455→                {effectiveProviderId || '检测中…'}
+   456→              </code>
+   457→              {llmInfo?.available && llmInfo.available.length > 0 && (
+   458→                <span className="ml-2 text-claude-text-muted">
+   459→                  {chosenProvider === AUTO_PROVIDER
+   460→                    ? `自动 (${llmInfo.available.length} 可用，扫描了 ${llmInfo.totalClisScanned} 种 CLI)`
+   461→                    : `已锁定 (${llmInfo.available.length} 可用)`}
+   462→                </span>
+   463→              )}
+   464→            </div>
+   465→            <div className="flex items-center gap-1">
+   466→              <Button
+   467→                variant="ghost"
+   468→                size="sm"
+   469→                className="h-6 text-xs"
+   470→                onClick={() => {
+   471→                  // Re-fetch without wiping current data so the UI doesn't flash.
+   472→                  fetch('/api/llm/providers')
+   473→                    .then(r => r.json())
+   474→                    .then((d: LlmInfo) => setLlmInfo(d))
+   475→                    .catch(() => {/* ignore */});
+   476→                }}
+   477→                title="重新扫描 CLI / SDK"
+   478→              >
+   479→                <RefreshCw className="h-3 w-3" />
+   480→              </Button>
+   481→              <Button variant="ghost" size="sm" className="h-6 text-xs" onClick={() => setShowLlmCfg(s => !s)}>
+   482→                {showLlmCfg ? '隐藏配置' : 'LLM 配置'}
+   483→              </Button>
+   484→            </div>
+   485→          </div>
+   486→
+   487→          {/* Available providers — click to pin / unpin */}
+   488→          {llmInfo?.available && llmInfo.available.length > 0 && (
+   489→            <div className="mt-2 flex flex-wrap gap-1.5">
+   490→              {/* AUTO pill — always first, restores default behavior */}
+   491→              <button
+   492→                type="button"
+   493→                onClick={() => pickProvider(AUTO_PROVIDER)}
+   494→                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border transition-colors ${
+   495→                  chosenProvider === AUTO_PROVIDER
+   496→                    ? 'border-claude-accent bg-claude-accent/15 text-claude-text font-medium'
+   497→                    : 'border-claude-border text-claude-text-muted hover:text-claude-text-secondary'
+   498→                }`}
+   499→                title="让服务器按 CLI → SDK → z-ai 顺序自动选择"
+   500→              >
+   501→                <Sparkles className="h-2.5 w-2.5" />
+   502→                <span>auto</span>
+   503→              </button>
+   504→              {llmInfo.available.map((a, i) => {
+   505→                const isPinned = chosenProvider === a.provider;
+   506→                const isEffective = effectiveProviderId === a.provider;
+   507→                return (
+   508→                  <button
+   509→                    key={i}
+   510→                    type="button"
+   511→                    onClick={() => pickProvider(a.provider)}
+   512→                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border transition-colors ${
+   513→                      isPinned
+   514→                        ? 'border-claude-accent bg-claude-accent/15 text-claude-text font-medium'
+   515→                        : isEffective
+   516→                        ? 'border-emerald-500/50 text-claude-text'
+   517→                        : 'border-claude-border text-claude-text-muted hover:text-claude-text-secondary'
+   518→                    }`}
+   519→                    title={a.reason}
+   520→                  >
+   521→                    <span className="font-mono">{a.provider}</span>
+   522→                    {a.bin && <span className="opacity-60">→ {a.bin.replace(/^.*\//, '~/')}</span>}
+   523→                    {isPinned && <span className="opacity-80">🔒</span>}
+   524→                  </button>
+   525→                );
+   526→              })}
+   527→            </div>
+   528→          )}
+   529→          <div className="mt-1.5 text-[10px] text-claude-text-muted">
+   530→            {chosenProvider === AUTO_PROVIDER
+   531→              ? 'auto 模式：服务器按 CLI → SDK → z-ai 顺序自动选，已锁定的 provider 加 🔒'
+   532→              : `已锁定到 ${chosenProvider}。点 auto 或其他 provider 切换。`}
+   533→          </div>
+   534→          {showLlmCfg && (
+   535→            <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
+   536→              <div className="col-span-2">
+   537→                <Label className="text-[10px] uppercase tracking-wide text-claude-text-muted">Provider</Label>
+   538→                <Input
+   539→                  placeholder="anthropic | openai | zai | cli:hermes | cli:claude | cli:codex | (空=auto)"
+   540→                  value={llmCfg.provider}
+   541→                  onChange={e => setLlmCfg({ ...llmCfg, provider: e.target.value })}
+   542→                  className="h-7 text-xs"
+   543→                />
+   544→              </div>
+   545→              <div>
+   546→                <Label className="text-[10px] uppercase tracking-wide text-claude-text-muted">API Key</Label>
+   547→                <Input
+   548→                  type="password"
+   549→                  placeholder="sk-…"
+   550→                  value={llmCfg.apiKey}
+   551→                  onChange={e => setLlmCfg({ ...llmCfg, apiKey: e.target.value })}
+   552→                  className="h-7 text-xs"
+   553→                />
+   554→              </div>
+   555→              <div>
+   556→                <Label className="text-[10px] uppercase tracking-wide text-claude-text-muted">Base URL</Label>
+   557→                <Input
+   558→                  placeholder="https://api.openai.com/v1"
+   559→                  value={llmCfg.baseUrl}
+   560→                  onChange={e => setLlmCfg({ ...llmCfg, baseUrl: e.target.value })}
+   561→                  className="h-7 text-xs"
+   562→                />
+   563→              </div>
+   564→              <div>
+   565→                <Label className="text-[10px] uppercase tracking-wide text-claude-text-muted">Model</Label>
+   566→                <Input
+   567→                  placeholder="claude-sonnet-4-20250514 / gpt-4o-mini / …"
+   568→                  value={llmCfg.model}
+   569→                  onChange={e => setLlmCfg({ ...llmCfg, model: e.target.value })}
+   570→                  className="h-7 text-xs"
+   571→                />
+   572→              </div>
+   573→              <div>
+   574→                <Label className="text-[10px] uppercase tracking-wide text-claude-text-muted">System</Label>
+   575→                <Input
+   576→                  placeholder="(可选) 系统提示"
+   577→                  value={llmCfg.system}
+   578→                  onChange={e => setLlmCfg({ ...llmCfg, system: e.target.value })}
+   579→                  className="h-7 text-xs"
+   580→                />
+   581→              </div>
+   582→            </div>
+   583→          )}
+   584→        </div>
+   585→
+   586→        {/* Module 1: Daily Structural Biology Literature (faithful port of the Hermes workflow) */}
+   587→                <div className="rounded-lg border border-claude-border dark:border-[#3d3832] p-3">
+   588→                  <div className="flex items-center gap-2 mb-2">
+   589→                    <BookOpen className="h-4 w-4 text-blue-500" />
+   590→                    <h3 className="text-sm font-semibold flex-1">① 每日结构生物学文献获取</h3>
+   591→                    <code className="text-[10px] text-claude-text-muted">POST /api/literature/daily/run</code>
+   592→                  </div>
+   593→                  <p className="text-xs text-claude-text-secondary mb-3">
+   594→                    双路径 PubMed 检索（Path A: MeSH+方法关键词 / Path B: 高 IF 期刊+方法关键词）→ ±N 天窗口 → 方法筛选（Cryo-EM / X-ray / NMR / AlphaFold）→ 去重排序 → 每篇 LLM 中文研究概要 → 可选执行摘要 → 写入
+   595→                    <code className="px-1 mx-1 rounded bg-claude-border-light text-[10px]">PubMedArticle</code>
+   596→                    + <code className="px-1 mx-1 rounded bg-claude-border-light text-[10px]">daily-reports/structural-biology/YYYY-MM-DD/index.md</code>
+   597→                    + 主索引 <code className="px-1 rounded bg-claude-border-light text-[10px]">index.md</code>。
+   598→                  </p>
+   599→                  <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-2">
+   600→                    <div>
+   601→                      <Label className="text-[10px]">日期</Label>
+   602→                      <Input type="date" value={litDate} onChange={e => setLitDate(e.target.value)} className="h-7 text-xs" />
+   603→                    </div>
+   604→                    <div>
+   605→                      <Label className="text-[10px]">±窗口天数</Label>
+   606→                      <Input type="number" min={0} max={7} value={litWindowDays} onChange={e => setLitWindowDays(parseInt(e.target.value || '3'))} className="h-7 text-xs" />
+   607→                    </div>
+   608→                    <div>
+   609→                      <Label className="text-[10px]">Path A 上限</Label>
+   610→                      <Input type="number" min={10} max={1000} value={litMaxPathA} onChange={e => setLitMaxPathA(parseInt(e.target.value || '300'))} className="h-7 text-xs" />
+   611→                    </div>
+   612→                    <div>
+   613→                      <Label className="text-[10px]">Path B 上限</Label>
+   614→                      <Input type="number" min={5} max={200} value={litMaxPathB} onChange={e => setLitMaxPathB(parseInt(e.target.value || '50'))} className="h-7 text-xs" />
+   615→                    </div>
+   616→                    <div>
+   617→                      <Label className="text-[10px]">最终入选上限</Label>
+   618→                      <Input type="number" min={1} max={100} value={litMaxPapers} onChange={e => setLitMaxPapers(parseInt(e.target.value || '20'))} className="h-7 text-xs" />
+   619→                    </div>
+   620→                  </div>
+   621→                  <div className="flex items-center gap-2 mb-2">
+   622→                    <label className="text-xs flex items-center gap-1">
+   623→                      <input type="checkbox" checked={litSkipWikiFiles} onChange={e => setLitSkipWikiFiles(e.target.checked)} />
+   624→                      仅 DB（不写 LLM-Wiki 文件）
+   625→                    </label>
+   626→                    <div className="flex-1" />
+   627→                    <Button onClick={runLiterature} disabled={running !== null && running !== 'lit'} size="sm" className="h-7">
+   628→                      {running === 'lit' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+   629→                      <span className="ml-1">执行</span>
+   630→                    </Button>
+   631→                  </div>
+   632→                  {/* SSE progress for ① */}
+   633→                  {litStream.state.log.length > 0 && (
+   634→                    <div className="mt-2 rounded border border-claude-border bg-claude-bg-elevated/40 p-2 max-h-32 overflow-y-auto">
+   635→                      <div className="flex items-center gap-2 mb-1">
+   636→                        <span className="text-[10px] font-semibold text-claude-text-secondary">SSE 进度</span>
+   637→                        {litStream.state.running && <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 text-[10px]"><Loader2 className="h-2.5 w-2.5 animate-spin" /> streaming…</span>}
+   638→                        {litStream.state.done && <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] ${litStream.state.ok ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30' : 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30'}`}>{litStream.state.ok ? '✓ done' : '✗ failed'}</span>}
+   639→                      </div>
+   640→                      <div className="space-y-0.5">
+   641→                        {litStream.state.log.slice(-10).map((e, i) => { const txt = (e.detail || e.message || e.stage || '').toString().trim(); if (!txt) return null; return <div key={i} className="text-[10px] font-mono flex gap-2"><span className="text-claude-text-muted shrink-0">{new Date(e.ts).toLocaleTimeString()}</span><span className={`shrink-0 ${e.level === 'error' ? 'text-red-500' : e.level === 'warn' ? 'text-amber-500' : 'text-blue-500'}`}>{e.stage || e.level || 'info'}</span><span className="flex-1 text-claude-text-secondary truncate">{txt}</span></div>; })}
+   642→                      </div>
+   643→                    </div>
+   644→                  )}
+   645→                  {/* Existing reports quick-jump */}
+   646→                  {litExistingReports.length > 0 && (
+   647→                    <div className="mt-2 pt-2 border-t border-claude-border/50">
+   648→                      <div className="text-[10px] text-claude-text-muted mb-1">
+   649→                        历史报告 ({litExistingReports.length} 天):
+   650→                      </div>
+   651→                      <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+   652→                        {litExistingReports.slice(0, 30).map(r => (
+   653→                          <button
+   654→                            key={r.date}
+   655→                            type="button"
+   656→                            onClick={() => setLitDate(r.date)}
+   657→                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border border-claude-border hover:bg-claude-bg-elevated text-claude-text-muted hover:text-claude-text"
+   658→                            title={`${r.date} — ${r.paperCount} 篇${r.hasLLMDigest ? ' (有 LLM 摘要)' : ''}`}
+   659→                          >
+   660→                            <span className="font-mono">{r.date.slice(5)}</span>
+   661→                            <span className="opacity-60">{r.paperCount || '?'}</span>
+   662→                            {r.hasLLMDigest && <Sparkles className="h-2 w-2 text-purple-400" />}
+   663→                          </button>
+   664→                        ))}
+   665→                      </div>
+   666→                    </div>
+   667→                  )}
+   668→                </div>
+   669→
+   670→        {/* Module 2: Target Evaluation + LLM Report (atomic) */}
+   671→        <div className="rounded-lg border border-claude-border dark:border-[#3d3832] p-3">
+   672→          <div className="flex items-center gap-2 mb-2">
+   673→            <FlaskConical className="h-4 w-4 text-emerald-500" />
+   674→            <h3 className="text-sm font-semibold flex-1">② 蛋白靶点评估 + LLM 可行性报告</h3>
+   675→            <code className="text-[10px] text-claude-text-muted">POST /api/evaluations/run</code>
+   676→          </div>
+   677→          <p className="text-xs text-claude-text-secondary mb-3">
+   678→            UniProt → 元数据 + 序列 → RCSB 直接 PDB → SIFTS 覆盖率 → NCBI BLASTp 同源 → 评分 → <strong>原子任务包含 LLM 报告生成</strong>（写入 Evaluation.report + EvaluationReport 表 + 可选 LLM-Wiki/wiki/evaluations/）。
+   679→          </p>
+   680→          <div className="flex items-end gap-2 mb-2">
+   681→            <div className="flex-1">
+   682→              <Label className="text-[10px]">UniProt ID</Label>
+   683→              <Input value={evalUniprot} onChange={e => setEvalUniprot(e.target.value)} placeholder="P00533" className="h-7 text-xs font-mono" />
+   684→            </div>
+   685→            <div className="w-20">
+   686→              <Label className="text-[10px]">maxPdb</Label>
+   687→              <Input type="number" min={1} max={500} value={evalMaxPdb} onChange={e => setEvalMaxPdb(parseInt(e.target.value || '80'))} className="h-7 text-xs" />
+   688→            </div>
+   689→            <label className="text-xs flex items-center gap-1 pb-1.5">
+   690→              <input type="checkbox" checked={evalForceBlast} onChange={e => setEvalForceBlast(e.target.checked)} />
+   691→              forceBlast
+   692→            </label>
+   693→            <label className="text-xs flex items-center gap-1 pb-1.5">
+   694→              <input type="checkbox" checked={evalSkipBlast} onChange={e => setEvalSkipBlast(e.target.checked)} />
+   695→              skipBlast
+   696→            </label>
+   697→            <Button onClick={runEvaluation} disabled={running !== null && running !== 'eval'} size="sm" className="h-7">
+   698→              {running === 'eval' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+   699→              <span className="ml-1">执行</span>
+   700→            </Button>
+   701→          </div>
+   702→          {/* SSE progress for ② */}
+   703→          {evalStream.state.log.length > 0 && (
+   704→            <div className="mt-2 rounded border border-claude-border bg-claude-bg-elevated/40 p-2 max-h-32 overflow-y-auto">
+   705→              <div className="flex items-center gap-2 mb-1">
+   706→                <span className="text-[10px] font-semibold text-claude-text-secondary">SSE 进度</span>
+   707→                {evalStream.state.running && <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 text-[10px]"><Loader2 className="h-2.5 w-2.5 animate-spin" /> streaming…</span>}
+   708→                {evalStream.state.done && <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] ${evalStream.state.ok ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30' : 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30'}`}>{evalStream.state.ok ? '✓ done' : '✗ failed'}</span>}
+   709→              </div>
+   710→              <div className="space-y-0.5">
+   711→                {evalStream.state.log.slice(-10).map((e, i) => { const txt = (e.detail || e.message || e.stage || '').toString().trim(); if (!txt) return null; return <div key={i} className="text-[10px] font-mono flex gap-2"><span className="text-claude-text-muted shrink-0">{new Date(e.ts).toLocaleTimeString()}</span><span className={`shrink-0 ${e.level === 'error' ? 'text-red-500' : e.level === 'warn' ? 'text-amber-500' : 'text-blue-500'}`}>{e.stage || e.level || 'info'}</span><span className="flex-1 text-claude-text-secondary truncate">{txt}</span></div>; })}
+   712→              </div>
+   713→            </div>
+   714→          )}
+   715→          <div className="flex items-center gap-3 text-xs">
+   716→            <label className="flex items-center gap-1">
+   717→              <input type="checkbox" checked={evalGenerateReport} onChange={e => setEvalGenerateReport(e.target.checked)} />
+   718→              同时生成 LLM 报告
+   719→            </label>
+   720→            <label className={`flex items-center gap-1 ${evalGenerateReport ? '' : 'opacity-40'}`}>
+   721→              <input
+   722→                type="checkbox"
+   723→                checked={evalSaveReportFile}
+   724→                disabled={!evalGenerateReport}
+   725→                onChange={e => setEvalSaveReportFile(e.target.checked)}
+   726→              />
+   727→              写入 LLM-Wiki 文件
+   728→            </label>
+   729→            {evalGenerateReport && (
+   730→              <span className="text-claude-text-muted text-[10px]">
+   731→                默认原子任务 (评估 + 报告 ~50s)
+   732→              </span>
+   733→            )}
+   734→          </div>
+   735→        </div>
+   736→
+   737→        {/* Module 3: Manual PDB Weekly Report — in-process 3-cycle orchestrator */}
+   738→        <div className="rounded-lg border border-claude-border dark:border-[#3d3832] p-3">
+   739→          <div className="flex items-center gap-2 mb-2">
+   740→            <CalendarClock className="h-4 w-4 text-amber-500" />
+   741→            <h3 className="text-sm font-semibold flex-1">③ 手动触发本周 PDB 周报</h3>
+   742→            <code className="text-[10px] text-claude-text-muted">POST /api/pdb-weekly/run</code>
+   743→          </div>
+   744→          <p className="text-xs text-claude-text-secondary mb-3">
+   745→            web-v3 进程内 2-step 对抗式生成器：fetch → backfill → PubMed → Generator → Critic-Scientific → (Synthesis) → 写 DB。
+   746→            复用当前选中的 LLM 提供方（与 ② 共享 Provider）。SSE 流式推送进度，页面不会冻结。预计耗时 5–15 分钟。
+   747→          </p>
+   748→
+   749→          {/* Window + DB counts */}
+   750→          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2 text-xs">
+   751→            <div>
+   752→              <Label className="text-[10px]">ISO Week</Label>
+   753→              <div className="h-7 px-2 rounded border border-claude-border bg-claude-bg-elevated/40 flex items-center font-mono text-claude-text">
+   754→                {weeklyWindow?.weekId || '…'}
+   755→              </div>
+   756→            </div>
+   757→            <div>
+   758→              <Label className="text-[10px]">报告日期</Label>
+   759→              <div className="h-7 px-2 rounded border border-claude-border bg-claude-bg-elevated/40 flex items-center font-mono text-claude-text-secondary">
+   760→                {weeklyWindow?.reportDate || '…'}
+   761→              </div>
+   762→            </div>
+   763→            <div>
+   764→              <Label className="text-[10px]">起始</Label>
+   765→              <div className="h-7 px-2 rounded border border-claude-border bg-claude-bg-elevated/40 flex items-center font-mono text-claude-text-secondary">
+   766→                {weeklyWindow?.startDate || '…'}
+   767→              </div>
+   768→            </div>
+   769→            <div>
+   770→              <Label className="text-[10px]">结束 (RCSB)</Label>
+   771→              <div className="h-7 px-2 rounded border border-claude-border bg-claude-bg-elevated/40 flex items-center font-mono text-claude-text-secondary">
+   772→                {weeklyWindow?.endDate || '…'}
+   773→              </div>
+   774→            </div>
+   775→          </div>
+   776→
+   777→          {/* DB row counts (informational) */}
+   778→          {weeklyDbCounts && (
+   779→            <div className="text-[10px] text-claude-text-muted mb-3">
+   780→              DB 中本周已有：
+   781→              <code className="px-1 mx-1 rounded bg-claude-border-light text-claude-text-secondary">PdbStructure {weeklyDbCounts.pdbStructure}</code>
+   782→              <code className="px-1 mx-1 rounded bg-claude-border-light text-claude-text-secondary">WeeklyReport {weeklyDbCounts.weeklyReport}</code>
+   783→              <code className="px-1 mx-1 rounded bg-claude-border-light text-claude-text-secondary">WeeklySnapshot {weeklyDbCounts.weeklySnapshot}</code>
+   784→            </div>
+   785→          )}
+   786→
+   787→          {/* Cycle selector + Run button */}
+   788→          <div className="flex items-center gap-2">
+   789→            <label className="text-xs flex items-center gap-1">
+   790→              Cycle:
+   791→              <select
+   792→                className="h-7 text-xs rounded border border-claude-border bg-claude-bg px-1 ml-1"
+   793→                defaultValue="2"
+   794→                id="weekly-max-cycles"
+   795→                onChange={e => { (document.getElementById('weekly-max-cycles') as HTMLSelectElement).value = e.target.value; }}
+   796→              >
+   797→                <option value="1">1 (单步，~5 min)</option>
+   798→                <option value="2">2 (Generator + 1 Critic，~10 min)</option>
+   799→                <option value="3">3 (完整 3-cycle，~15 min)</option>
+   800→              </select>
+   801→            </label>
+   802→            <Button
+   803→              onClick={() => {
+   804→                const v = parseInt((document.getElementById('weekly-max-cycles') as HTMLSelectElement)?.value || '2', 10);
+   805→                const cycles = v === 1 ? 1 : v === 2 ? 2 : 3;
+   806→                runWeekly(cycles as 1 | 2 | 3);
+   807→              }}
+   808→              disabled={running !== null && running !== 'weekly'}
+   809→              size="sm"
+   810→              className="h-7"
+   811→              title="点击后页面不会冻结——后端 SSE 推送进度事件。"
+   812→            >
+   813→              {running === 'weekly' ? <Loader2 className="h-3 w-3 animate-spin" /> : <Play className="h-3 w-3" />}
+   814→              <span className="ml-1">{running === 'weekly' ? '运行中…' : '立即触发'}</span>
+   815→            </Button>
+   816→            {running === 'weekly' && (
+   817→              <Button
+   818→                onClick={() => weeklyStream.cancel()}
+   819→                variant="outline"
+   820→                size="sm"
+   821→                className="h-7"
+   822→                title="取消请求（后端可能在几秒后才真正停止）"
+   823→              >
+   824→                取消
+   825→              </Button>
+   826→            )}
+   827→            <span className="text-[10px] text-claude-text-muted ml-auto">
+   828→              LLM 提供方同上 → <code className="px-1 rounded bg-claude-border-light">{effectiveProviderId || 'auto'}</code>
+   829→            </span>
+   830→          </div>
+   831→
+   832→          {/* Live SSE progress — shows the most recent progress events */}
+   833→          {weeklyStream.state.log.length > 0 && (
+   834→            <div className="mt-3 rounded border border-claude-border bg-claude-bg-elevated/40 p-2 max-h-48 overflow-y-auto">
+   835→              <div className="flex items-center gap-2 mb-1.5">
+   836→                <span className="text-[10px] font-semibold text-claude-text-secondary">SSE 进度</span>
+   837→                <span className="text-[10px] text-claude-text-muted">({weeklyStream.state.log.length} events)</span>
+   838→                {weeklyStream.state.running && (
+   839→                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-700 dark:text-blue-300 border border-blue-500/30 text-[10px]">
+   840→                    <Loader2 className="h-2.5 w-2.5 animate-spin" /> streaming…
+   841→                  </span>
+   842→                )}
+   843→                {weeklyStream.state.done && (
+   844→                  <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full border text-[10px] ${
+   845→                    weeklyStream.state.ok
+   846→                      ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300 border-emerald-500/30'
+   847→                      : 'bg-red-500/15 text-red-700 dark:text-red-300 border-red-500/30'
+   848→                  }`}>
+   849→                    {weeklyStream.state.ok ? '✓ done' : '✗ failed'}
+   850→                  </span>
+   851→                )}
+   852→              </div>
+   853→              <div className="space-y-0.5">
+   854→                {weeklyStream.state.log.slice(-30).map((e, i) => {
+   855→                  const txt = (e.detail || e.message || e.stage || '').toString().trim();
+   856→                  if (!txt) return null;
+   857→                  return (
+   858→                    <div key={i} className="text-[10px] font-mono flex gap-2 leading-tight">
+   859→                      <span className="text-claude-text-muted shrink-0">{new Date(e.ts).toLocaleTimeString()}</span>
+   860→                      <span className={`shrink-0 ${e.level === 'error' ? 'text-red-500' : e.level === 'warn' ? 'text-amber-500' : 'text-blue-500'}`}>
+   861→                        {e.stage || e.level || 'info'}
+   862→                      </span>
+   863→                      <span className="flex-1 text-claude-text-secondary truncate" title={txt}>{txt}</span>
+   864→                    </div>
+   865→                  );
+   866→                })}
+   867→              </div>
+   868→            </div>
+   869→          )}
+   870→        </div>
+   871→
+   872→        {/* Logs */}
+   873→        {logs.length > 0 && (
+   874→          <div className="rounded-lg border border-claude-border dark:border-[#3d3832] p-3 bg-claude-bg-elevated/40 max-h-72 overflow-y-auto">
+   875→            <h4 className="text-xs font-semibold mb-2 text-claude-text-secondary">执行日志 ({logs.length})</h4>
+   876→            <div className="space-y-2">
+   877→              {logs.map((l, i) => (
+   878→                <div key={i} className="text-xs border-l-2 pl-2 py-1" style={{
+   879→                  borderColor: l.status === 'success' ? '#22c55e' : l.status === 'error' ? '#ef4444' : '#3b82f6',
+   880→                }}>
+   881→                  <div className="flex items-center gap-1.5">
+   882→                    {l.status === 'success' && <CheckCircle2 className="h-3 w-3 text-emerald-500" />}
+   883→                    {l.status === 'error' && <XCircle className="h-3 w-3 text-red-500" />}
+   884→                    {l.status === 'running' && <Loader2 className="h-3 w-3 animate-spin text-blue-500" />}
+   885→                    <span className="text-claude-text-muted font-mono">{l.ts.slice(11, 19)}</span>
+   886→                    <span className="font-medium flex-1">{l.summary}</span>
+   887→                    {l.durationMs != null && <span className="text-claude-text-muted">{Math.round(l.durationMs / 100) / 10}s</span>}
+   888→                  </div>
+   889→                  {l.details && (
+   890→                    <pre className="mt-1 text-[10px] whitespace-pre-wrap text-claude-text-secondary max-h-32 overflow-y-auto">
+   891→                      {l.details}
+   892→                    </pre>
+   893→                  )}
+   894→                </div>
+   895→              ))}
+   896→            </div>
+   897→          </div>
+   898→        )}
+   899→
+   900→        <DialogFooter>
+   901→          <a
+   902→            href="https://hermes-agent.nousresearch.com/docs"
+   903→            target="_blank"
+   904→            rel="noopener noreferrer"
+   905→            className="text-[10px] text-claude-text-muted hover:text-claude-text-secondary flex items-center gap-1"
+   906→          >
+   907→            <ExternalLink className="h-3 w-3" /> Hermes docs
+   908→          </a>
+   909→        </DialogFooter>
+   910→      </DialogContent>
+   911→    </Dialog>
+   912→  );
+   913→}
+   914→
