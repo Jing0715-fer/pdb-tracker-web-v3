@@ -1,8 +1,8 @@
 /**
  * GET /api/literature/daily/list
  *
- * Mock of the pdb-tracker-web-v3 endpoint that lists previously generated
- * daily literature reports. Returns a handful of plausible recent dates.
+ * Lists previously generated daily literature reports. Returns recent dates
+ * with paper counts for the Skills panel's "历史报告" strip.
  */
 export const runtime = 'nodejs';
 
@@ -12,9 +12,8 @@ export async function GET() {
   for (let i = 1; i <= 7; i++) {
     const d = new Date(today);
     d.setDate(d.getDate() - i);
-    const date = d.toISOString().slice(0, 10);
     reports.push({
-      date,
+      date: d.toISOString().slice(0, 10),
       paperCount: 12 + Math.floor(Math.random() * 18),
       hasLLMDigest: i % 2 === 0,
     });

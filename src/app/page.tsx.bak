@@ -1,0 +1,17 @@
+import { Suspense } from 'react';
+import PdbTracker from '@/components/pdb-tracker';
+import { ErrorBoundary } from '@/components/error-boundary';
+
+export default function Home() {
+  return (
+    <div className="h-screen flex flex-col bg-claude-bg overflow-hidden">
+      <main className="flex-1 flex min-h-0">
+        <ErrorBoundary>
+          <Suspense fallback={null}>
+            <PdbTracker />
+          </Suspense>
+        </ErrorBoundary>
+      </main>
+    </div>
+  );
+}

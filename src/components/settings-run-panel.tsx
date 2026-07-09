@@ -67,10 +67,10 @@ import {
   FileText,
   Zap,
   ShieldCheck,
-  AlertTriangle,
   Terminal,
   Lock,
   Layers,
+  Search,
 } from 'lucide-react';
 
 /* ──────────────────────────────────────────────────────────────────────── */
@@ -220,12 +220,36 @@ function StreamFeed({
         <StatusPill running={running} done={done} ok={ok} />
       </div>
 
-      {/* progress bar */}
+      {/* progress bar with percentage label */}
       {typeof lastProgress === 'number' && (
-        <div className="px-3 pt-2">
-          <Progress value={lastProgress} className="h-1" />
+        <div className="px-3 pt-2.5 pb-1.5">
+          <div className="flex items-center justify-between mb-1">
+            <span className="text-[9px] font-mono text-muted-foreground tabular-nums">
+              {lastProgress < 100 ? 'processing' : 'complete'}
+            </span>
+            <span className={`text-[10px] font-mono font-semibold tabular-nums ${done ? (ok ? 'text-emerald-500' : 'text-rose-500') : 'text-sky-500'}`}>
+              {lastProgress}%
+            </span>
+          </div>
+          <div className="relative h-1.5 rounded-full bg-muted overflow-hidden">
+            <motion.div
+              className={`absolute inset-y-0 left-0 rounded-full ${
+                done ? (ok ? 'bg-emerald-500' : 'bg-rose-500') : 'bg-gradient-to-r from-sky-500 to-sky-400'
+              }`}
+              initial={{ width: 0 }}
+              animate={{ width: `${lastProgress}%` }}
+              transition={{ type: 'spring', stiffness: 120, damping: 20 }}
+            >
+              {running && (
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-[shimmer_1.5s_infinite]" />
+              )}
+            </motion.div>
+          </div>
         </div>
       )}
+
+      {/* stage timeline strip — collapses repeated stages into milestones */}
+      <StageTimeline events={events} />
 
       {/* log lines */}
       <div ref={scrollRef} className="max-h-44 overflow-y-auto px-3 py-2 space-y-1">
@@ -249,9 +273,143 @@ function StreamFeed({
   );
 }
 
+/**
+ * StageTimeline — a horizontal strip of milestone "chips" derived from the SSE
+ * event stream. Collapses repeated stages (e.g. multiple `llm-digest` events)
+ * into a single chip, colour-coding by the latest level seen for that stage.
+ */
+function StageTimeline({ events }: { events: StreamEvent[] }) {
+  // Build an ordered list of unique stages with their latest level + progress.
+  const stageMap = new Map<string, { level?: string; progress?: number; count: number }>();
+  const order: string[] = [];
+  for (const e of events) {
+    const stage = e.stage || e.level || 'info';
+    if (!stageMap.has(stage)) {
+      stageMap.set(stage, { level: e.level, progress: e.progress, count: 1 });
+      order.push(stage);
+    } else {
+      const cur = stageMap.get(stage)!;
+      cur.level = e.level || cur.level;
+      cur.progress = e.progress ?? cur.progress;
+      cur.count += 1;
+    }
+  }
+  if (order.length === 0) return null;
+
+  return (
+    <div className="px-3 pb-2 pt-1 border-b border-border/40">
+      <div className="flex items-center gap-1 overflow-x-auto pb-1 thin-scroll">
+        {order.map((stage, i) => {
+          const info = stageMap.get(stage)!;
+          const isLast = i === order.length - 1;
+          const dotColor = info.level === 'error' ? 'bg-rose-500' : info.level === 'warn' ? 'bg-amber-500' : info.level === 'success' ? 'bg-emerald-500' : isLast ? 'bg-sky-500' : 'bg-muted-foreground/40';
+          return (
+            <div key={stage} className="flex items-center shrink-0">
+              <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-background/60 border border-border/40">
+                <span className={`h-1.5 w-1.5 rounded-full ${dotColor} ${isLast && !info.level ? 'animate-pulse' : ''}`} />
+                <span className="text-[9px] font-mono text-muted-foreground whitespace-nowrap">{stage}</span>
+                {info.count > 1 && <span className="text-[8px] text-muted-foreground/50">×{info.count}</span>}
+              </div>
+              {!isLast && <span className="text-muted-foreground/30 mx-0.5">→</span>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 /* ──────────────────────────────────────────────────────────────────────── */
 /*  Main component                                                           */
 /* ──────────────────────────────────────────────────────────────────────── */
+
+/**
+ * CycleTimeline — module ③专属的可视化时间轴。把对抗式生成器的
+ * Generator → Critic-Scientific → Synthesis 三阶段渲染成带状态点的横向轨道，
+ * 当前运行阶段带 pulse 动画，已完成阶段显示 ✓ + 耗时。
+ */
+function CycleTimeline({
+  events,
+  maxCycles,
+  running,
+  result,
+}: {
+  events: StreamEvent[];
+  maxCycles: 1 | 2 | 3;
+  running: boolean;
+  result?: any;
+}) {
+  const roles = [
+    { key: 'generator', label: 'Generator', desc: '初版周报生成', color: 'sky' },
+    { key: 'critic-scientific', label: 'Critic-Sci', desc: '科学性评审', color: 'amber' },
+    { key: 'synthesis', label: 'Synthesis', desc: '综合终稿', color: 'emerald' },
+  ].slice(0, maxCycles);
+
+  // Derive per-role status from the event stream.
+  const roleStatus = roles.map((r) => {
+    const roleEvents = events.filter(e => (e.stage || '').includes(r.key));
+    const started = roleEvents.length > 0;
+    const completed = roleEvents.some(e => e.level === 'success') || (result?.cycles?.some((c: any) => c.role === r.key));
+    const verdict = result?.cycles?.find((c: any) => c.role === r.key)?.verdict;
+    return { ...r, started, completed, verdict, eventCount: roleEvents.length };
+  });
+
+  const hasAnyActivity = roleStatus.some(r => r.started);
+  if (!hasAnyActivity && !running) return null;
+
+  return (
+    <div className="mt-3 rounded-lg border border-border/60 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent p-3">
+      <div className="flex items-center gap-2 mb-2.5">
+        <Layers className="h-3 w-3 text-amber-500" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cycle Orchestration</span>
+        <span className="text-[10px] text-muted-foreground/60">· {maxCycles}-step pipeline</span>
+      </div>
+
+      {/* horizontal track */}
+      <div className="flex items-stretch gap-1">
+        {roleStatus.map((r, i) => {
+          const isLast = i === roleStatus.length - 1;
+          const colorMap: Record<string, { dot: string; ring: string; bg: string; text: string }> = {
+            sky: { dot: 'bg-sky-500', ring: 'border-sky-500/40', bg: 'bg-sky-500/5', text: 'text-sky-600 dark:text-sky-300' },
+            amber: { dot: 'bg-amber-500', ring: 'border-amber-500/40', bg: 'bg-amber-500/5', text: 'text-amber-600 dark:text-amber-300' },
+            emerald: { dot: 'bg-emerald-500', ring: 'border-emerald-500/40', bg: 'bg-emerald-500/5', text: 'text-emerald-600 dark:text-emerald-300' },
+          };
+          const c = colorMap[r.color];
+          return (
+            <div key={r.key} className="flex items-stretch flex-1 min-w-0">
+              <div className={`flex-1 rounded-lg border ${r.completed ? c.ring : 'border-border/60'} ${r.completed ? c.bg : 'bg-background/40'} p-2 transition-all`}>
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    {r.started && !r.completed && (
+                      <span className={`absolute inline-flex h-full w-full rounded-full ${c.dot} opacity-60`} style={{ animation: 'pulse-ring 1.5s ease-out infinite' }} />
+                    )}
+                    <span className={`relative inline-flex h-2 w-2 rounded-full ${r.completed ? c.dot : r.started ? c.dot : 'bg-muted-foreground/30'}`} />
+                  </span>
+                  <span className="text-[10px] font-semibold truncate">{r.label}</span>
+                  {r.completed && <CheckCircle2 className={`h-3 w-3 ${c.text} shrink-0`} />}
+                  {r.verdict && (
+                    <Badge variant="outline" className={`text-[8px] px-1 py-0 h-3.5 ${r.verdict === 'pass' ? 'border-emerald-500/30 text-emerald-600' : 'border-amber-500/30 text-amber-600'}`}>
+                      {r.verdict}
+                    </Badge>
+                  )}
+                </div>
+                <div className="text-[9px] text-muted-foreground truncate">{r.desc}</div>
+                <div className="text-[9px] font-mono text-muted-foreground/60 mt-0.5">
+                  {r.completed ? `${r.eventCount} events` : r.started ? 'running…' : 'pending'}
+                </div>
+              </div>
+              {!isLast && (
+                <div className="flex items-center px-0.5 shrink-0">
+                  <ChevronDown className="h-3 w-3 text-muted-foreground/40 -rotate-90" />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 export function SettingsRunPanel() {
   const [open, setOpen] = useState(false);
@@ -261,6 +419,8 @@ export function SettingsRunPanel() {
   const [llmCfg, setLlmCfg] = useState<LlmUserConfig>(() => loadStoredCfg());
   const [showLlmCfg, setShowLlmCfg] = useState(false);
   const [logs, setLogs] = useState<RunLog[]>([]);
+  const [logFilter, setLogFilter] = useState<'all' | 'literature' | 'eval' | 'weekly'>('all');
+  const [logSearch, setLogSearch] = useState('');
   const [running, setRunning] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
 
@@ -924,6 +1084,14 @@ export function SettingsRunPanel() {
                   </span>
                 </div>
 
+                {/* Cycle timeline — visualises the Generator → Critic → Synthesis orchestration */}
+                <CycleTimeline
+                  events={weeklyStream.state.log}
+                  maxCycles={weeklyCycles}
+                  running={running === 'weekly'}
+                  result={weeklyStream.state.result}
+                />
+
                 <StreamFeed
                   events={weeklyStream.state.log}
                   running={weeklyStream.state.running}
@@ -945,41 +1113,92 @@ export function SettingsRunPanel() {
                 className="mt-4"
               >
                 <div className="rounded-lg border border-border/60 bg-muted/20 overflow-hidden">
-                  <div className="flex items-center justify-between px-3 py-2 border-b border-border/60 bg-muted/40">
+                  {/* header with filter pills + search */}
+                  <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/60 bg-muted/40 flex-wrap">
                     <div className="flex items-center gap-2">
                       <Activity className="h-3.5 w-3.5 text-muted-foreground" />
                       <span className="text-xs font-semibold">执行日志</span>
-                      <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/60">{logs.length}</Badge>
+                      <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/60">
+                        {logFilter === 'all' ? logs.length : logs.filter(l => l.module === logFilter).length}
+                      </Badge>
                     </div>
-                    <Button variant="ghost" size="sm" className="h-6 text-[10px] text-muted-foreground" onClick={() => setLogs([])}>
-                      清空
-                    </Button>
+                    <div className="flex items-center gap-1.5">
+                      {/* module filter pills */}
+                      <div className="flex items-center gap-0.5 rounded-md bg-background/60 border border-border/40 p-0.5">
+                        {([
+                          { k: 'all', label: 'All' },
+                          { k: 'literature', label: '①' },
+                          { k: 'eval', label: '②' },
+                          { k: 'weekly', label: '③' },
+                        ] as const).map(f => (
+                          <button
+                            key={f.k}
+                            type="button"
+                            onClick={() => setLogFilter(f.k)}
+                            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                              logFilter === f.k ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
+                            }`}
+                            title={f.k === 'all' ? '全部' : f.k === 'literature' ? '文献' : f.k === 'eval' ? '评估' : '周报'}
+                          >
+                            {f.label}
+                          </button>
+                        ))}
+                      </div>
+                      {/* search box */}
+                      <div className="flex items-center h-6 rounded-md border border-border/40 bg-background/60 px-1.5 gap-1">
+                        <Search className="h-2.5 w-2.5 text-muted-foreground/60" />
+                        <input
+                          type="text"
+                          value={logSearch}
+                          onChange={e => setLogSearch(e.target.value)}
+                          placeholder="搜索…"
+                          className="w-16 bg-transparent text-[10px] outline-none placeholder:text-muted-foreground/50"
+                        />
+                      </div>
+                      <Button variant="ghost" size="sm" className="h-6 text-[10px] text-muted-foreground px-2" onClick={() => setLogs([])}>
+                        清空
+                      </Button>
+                    </div>
                   </div>
                   <ScrollArea className="max-h-56">
                     <div className="px-3 py-2 space-y-2">
-                      {logs.map((l, i) => (
-                        <div
-                          key={i}
-                          className="text-xs border-l-2 pl-2.5 py-1"
-                          style={{
-                            borderColor: l.status === 'success' ? '#22c55e' : l.status === 'error' ? '#ef4444' : '#3b82f6',
-                          }}
-                        >
-                          <div className="flex items-center gap-1.5">
-                            {l.status === 'success' && <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />}
-                            {l.status === 'error' && <XCircle className="h-3 w-3 text-rose-500 shrink-0" />}
-                            {l.status === 'running' && <Loader2 className="h-3 w-3 animate-spin text-sky-500 shrink-0" />}
-                            <span className="text-muted-foreground font-mono text-[10px] shrink-0">{l.ts.slice(11, 19)}</span>
-                            <span className="font-medium flex-1 leading-tight">{l.summary}</span>
-                            {l.durationMs != null && <span className="text-muted-foreground text-[10px] shrink-0">{Math.round(l.durationMs / 100) / 10}s</span>}
-                          </div>
-                          {l.details && (
-                            <pre className="mt-1 text-[10px] whitespace-pre-wrap text-muted-foreground max-h-32 overflow-y-auto font-mono leading-relaxed">
-                              {l.details}
-                            </pre>
-                          )}
-                        </div>
-                      ))}
+                      {logs
+                        .filter(l => logFilter === 'all' || l.module === logFilter)
+                        .filter(l => !logSearch || l.summary.toLowerCase().includes(logSearch.toLowerCase()) || (l.details || '').toLowerCase().includes(logSearch.toLowerCase()))
+                        .map((l, i) => {
+                          const moduleBadge = l.module === 'literature'
+                            ? { txt: '① 文献', cls: 'border-sky-500/30 text-sky-600 dark:text-sky-300 bg-sky-500/10' }
+                            : l.module === 'eval'
+                            ? { txt: '② 评估', cls: 'border-emerald-500/30 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10' }
+                            : { txt: '③ 周报', cls: 'border-amber-500/30 text-amber-600 dark:text-amber-300 bg-amber-500/10' };
+                          return (
+                            <div
+                              key={i}
+                              className="text-xs border-l-2 pl-2.5 py-1"
+                              style={{
+                                borderColor: l.status === 'success' ? '#22c55e' : l.status === 'error' ? '#ef4444' : '#3b82f6',
+                              }}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                {l.status === 'success' && <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />}
+                                {l.status === 'error' && <XCircle className="h-3 w-3 text-rose-500 shrink-0" />}
+                                {l.status === 'running' && <Loader2 className="h-3 w-3 animate-spin text-sky-500 shrink-0" />}
+                                <span className="text-muted-foreground font-mono text-[10px] shrink-0">{l.ts.slice(11, 19)}</span>
+                                <Badge variant="outline" className={`text-[8px] px-1 py-0 h-3.5 shrink-0 ${moduleBadge.cls}`}>{moduleBadge.txt}</Badge>
+                                <span className="font-medium flex-1 leading-tight">{l.summary}</span>
+                                {l.durationMs != null && <span className="text-muted-foreground text-[10px] shrink-0">{Math.round(l.durationMs / 100) / 10}s</span>}
+                              </div>
+                              {l.details && (
+                                <pre className="mt-1 text-[10px] whitespace-pre-wrap text-muted-foreground max-h-32 overflow-y-auto font-mono leading-relaxed">
+                                  {l.details}
+                                </pre>
+                              )}
+                            </div>
+                          );
+                        })}
+                      {logs.filter(l => logFilter === 'all' || l.module === logFilter).filter(l => !logSearch || l.summary.toLowerCase().includes(logSearch.toLowerCase()) || (l.details || '').toLowerCase().includes(logSearch.toLowerCase())).length === 0 && (
+                        <div className="text-[10px] text-muted-foreground/60 text-center py-3">无匹配日志</div>
+                      )}
                     </div>
                   </ScrollArea>
                 </div>
