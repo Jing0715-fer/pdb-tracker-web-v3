@@ -367,6 +367,9 @@ function LLMPreview({
   model,
   durationMs,
   fallback,
+  error,
+  ok,
+  dbSaved,
   chars,
   accent = 'emerald',
 }: {
@@ -376,21 +379,30 @@ function LLMPreview({
   model?: string;
   durationMs?: number;
   fallback?: boolean;
+  error?: string;
+  ok?: boolean;
+  dbSaved?: boolean;
   chars?: number;
   accent?: 'emerald' | 'sky';
 }) {
   const [expanded, setExpanded] = useState(true);
   const [copied, setCopied] = useState(false);
 
-  if (!content) return null;
+  // Failure case: no content but we have an error — show a failure card.
+  const isFailure = ok === false || (fallback && !content);
 
   const accentMap = {
     emerald: { ring: 'border-emerald-500/30', bg: 'from-emerald-500/5', icon: 'text-emerald-500', badge: 'border-emerald-500/30 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10' },
     sky: { ring: 'border-sky-500/30', bg: 'from-sky-500/5', icon: 'text-sky-500', badge: 'border-sky-500/30 text-sky-600 dark:text-sky-300 bg-sky-500/10' },
   };
   const a = accentMap[accent];
+  // Override styling for failure state.
+  const ringCls = isFailure ? 'border-rose-500/40' : a.ring;
+  const bgCls = isFailure ? 'from-rose-500/5' : a.bg;
+  const iconCls = isFailure ? 'text-rose-500' : a.icon;
 
   const copy = async () => {
+    if (!content) return;
     try {
       await navigator.clipboard.writeText(content);
       setCopied(true);
@@ -402,7 +414,7 @@ function LLMPreview({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`mt-3 rounded-lg border ${a.ring} bg-gradient-to-br ${a.bg} via-transparent to-transparent overflow-hidden`}
+      className={`mt-3 rounded-lg border ${ringCls} bg-gradient-to-br ${bgCls} via-transparent to-transparent overflow-hidden`}
     >
       {/* header */}
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/40 bg-background/40">
@@ -411,16 +423,39 @@ function LLMPreview({
           onClick={() => setExpanded(e => !e)}
           className="flex items-center gap-2 min-w-0 flex-1"
         >
-          <FileText className={`h-3.5 w-3.5 ${a.icon} shrink-0`} />
+          {isFailure ? (
+            <XCircle className={`h-3.5 w-3.5 ${iconCls} shrink-0`} />
+          ) : (
+            <FileText className={`h-3.5 w-3.5 ${iconCls} shrink-0`} />
+          )}
           <span className="text-xs font-semibold truncate">{title}</span>
-          {fallback && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-amber-500/40 text-amber-600 dark:text-amber-300 bg-amber-500/10 gap-0.5 shrink-0">
-              <AlertTriangle className="h-2.5 w-2.5" /> fallback
+          {/* LLM status badge — clearly shows real success vs failure */}
+          {ok === true && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 gap-0.5 shrink-0">
+              <CheckCircle2 className="h-2.5 w-2.5" /> LLM 真实生成
             </Badge>
           )}
-          <Badge variant="outline" className={`text-[9px] px-1 py-0 h-4 ${a.badge} gap-0.5 shrink-0`}>
-            <Sparkles className="h-2.5 w-2.5" /> {provider}/{model}
-          </Badge>
+          {isFailure && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
+              <XCircle className="h-2.5 w-2.5" /> LLM 调用失败
+            </Badge>
+          )}
+          {/* DB persistence badge */}
+          {dbSaved === true && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10 gap-0.5 shrink-0">
+              <Database className="h-2.5 w-2.5" /> 已入库
+            </Badge>
+          )}
+          {dbSaved === false && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
+              <Database className="h-2.5 w-2.5" /> 入库失败
+            </Badge>
+          )}
+          {!isFailure && (
+            <Badge variant="outline" className={`text-[9px] px-1 py-0 h-4 ${a.badge} gap-0.5 shrink-0`}>
+              <Sparkles className="h-2.5 w-2.5" /> {provider}/{model}
+            </Badge>
+          )}
           {chars != null && <span className="text-[9px] text-muted-foreground/60 font-mono shrink-0">{chars} chars</span>}
           {durationMs != null && <span className="text-[9px] text-muted-foreground/60 font-mono shrink-0 hidden sm:inline">{(durationMs / 1000).toFixed(1)}s</span>}
         </button>
@@ -443,9 +478,27 @@ function LLMPreview({
             transition={{ duration: 0.2 }}
             className="overflow-hidden"
           >
-            <div className="px-3 py-2 max-h-72 overflow-y-auto thin-scroll text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none">
-              <LazyMarkdown>{content}</LazyMarkdown>
-            </div>
+            {isFailure ? (
+              // Failure body — show the error message clearly, no fake content.
+              <div className="px-3 py-3 bg-rose-500/5">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+                  <div className="min-w-0">
+                    <div className="text-xs font-semibold text-rose-600 dark:text-rose-300 mb-1">LLM 调用失败</div>
+                    <div className="text-[11px] text-muted-foreground font-mono break-all">
+                      {error || '未知错误'}
+                    </div>
+                    <div className="text-[10px] text-muted-foreground/70 mt-2">
+                      本次运行未生成报告文本（已跳过 fallback，不伪造内容）。请检查 z-ai SDK 配置 / 网络 / 配额后重试。
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : content ? (
+              <div className="px-3 py-2 max-h-72 overflow-y-auto thin-scroll text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+                <LazyMarkdown>{content}</LazyMarkdown>
+              </div>
+            ) : null}
           </motion.div>
         )}
       </AnimatePresence>
@@ -886,7 +939,7 @@ export function SettingsRunPanel() {
         </Button>
       </DialogTrigger>
 
-      <DialogContent className="max-w-4xl max-h-[92vh] p-0 gap-0 overflow-hidden">
+      <DialogContent className="max-w-6xl sm:!max-w-6xl w-[95vw] max-h-[92vh] p-0 gap-0 overflow-hidden">
         {/* ── Header band ─────────────────────────────────────────────── */}
         <div className="relative px-6 pt-6 pb-4 border-b border-border/60 bg-gradient-to-br from-muted/40 via-background to-background">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,var(--tw-gradient-stops))] from-primary/5 via-transparent to-transparent pointer-events-none" />
@@ -1130,16 +1183,19 @@ export function SettingsRunPanel() {
                   emptyHint="点击「执行」启动 PubMed 双路径检索 + LLM 摘要流水线"
                 />
 
-                {/* LLM digest inline preview (module ①) */}
-                {litStream.state.done && litStream.state.result?.digest && (
+                {/* LLM digest inline preview (module ①) — shows real LLM output or failure */}
+                {litStream.state.done && litStream.state.result && (
                   <LLMPreview
                     content={litStream.state.result.digest}
                     title={`LLM 每日精选摘要 · ${litStream.state.result.date}`}
                     provider={litStream.state.result.provider}
-                    model={litStream.state.result.model}
-                    durationMs={undefined}
+                    model={litStream.state.result.llmModel || litStream.state.result.model}
+                    durationMs={litStream.state.result.llmDurationMs}
                     fallback={litStream.state.result.llmFallback}
-                    chars={litStream.state.result.digest.length}
+                    error={litStream.state.result.llmError}
+                    ok={litStream.state.result.llmOk}
+                    dbSaved={litStream.state.result.dbSaved}
+                    chars={litStream.state.result.digest?.length || 0}
                     accent="sky"
                   />
                 )}
@@ -1207,8 +1263,8 @@ export function SettingsRunPanel() {
                   emptyHint="输入 UniProt ID 并点击「执行」启动评估流水线"
                 />
 
-                {/* LLM report inline preview (module ②) */}
-                {evalStream.state.done && evalStream.state.result?.report?.content && (
+                {/* LLM report inline preview (module ②) — shows real LLM output or failure */}
+                {evalStream.state.done && evalStream.state.result?.report && (
                   <LLMPreview
                     content={evalStream.state.result.report.content}
                     title={`LLM 可行性报告 · ${evalStream.state.result.uniprotInfo?.proteinName || evalStream.state.result.uniprot}`}
@@ -1216,6 +1272,9 @@ export function SettingsRunPanel() {
                     model={evalStream.state.result.report.model}
                     durationMs={evalStream.state.result.report.durationMs}
                     fallback={evalStream.state.result.report.fallback}
+                    error={evalStream.state.result.report.error}
+                    ok={evalStream.state.result.report.ok}
+                    dbSaved={evalStream.state.result.dbSaved}
                     chars={evalStream.state.result.report.contentChars}
                     accent="emerald"
                   />

@@ -187,3 +187,76 @@ model Ligand {
   description String?
   imageUrl    String?
 }
+
+/// Skills 面板运行记录（持久化）— 每次触发①②③模块都写一条
+model SkillRunRecord {
+  id          String   @id @default(cuid())
+  module      String   // 'literature' | 'eval' | 'weekly'
+  status      String   // 'success' | 'error'
+  summary     String
+  details     String?  // JSON 摘要（counts/scores 等）
+  provider    String?
+  model       String?
+  llmOk       Boolean? // LLM 是否真实成功（非 fallback）
+  llmFallback Boolean? @default(false)
+  llmError    String?  // LLM 失败原因
+  durationMs  Int?
+  resultJson  String?  // 完整 result payload (JSON string)
+  createdAt   DateTime @default(now())
+
+  @@index([module])
+  @@index([createdAt])
+}
+
+/// 模块① 文献每日摘要（持久化）— 每次 LLM 生成的摘要落库
+model LiteratureDigest {
+  id           String   @id @default(cuid())
+  date         String   // YYYY-MM-DD
+  paperCount   Int
+  methodStats  String?  // JSON
+  digest       String   // LLM 生成的 Markdown 摘要
+  llmOk        Boolean
+  llmProvider  String?
+  llmModel     String?
+  llmDurationMs Int?
+  filePath     String?
+  createdAt    DateTime @default(now())
+
+  @@unique([date])
+  @@index([createdAt])
+}
+
+/// 模块② 评估 LLM 报告（持久化）
+model SkillEvaluationReport {
+  id            String   @id @default(cuid())
+  uniprotId     String
+  proteinName   String?
+  overallScore  Int
+  directPdbCount Int
+  coverage      Int
+  report        String   // LLM 生成的 Markdown 报告
+  llmOk         Boolean
+  llmProvider   String?
+  llmModel      String?
+  llmDurationMs Int?
+  filePath      String?
+  createdAt     DateTime @default(now())
+
+  @@index([uniprotId])
+  @@index([createdAt])
+}
+
+/// 模块③ 周报（持久化）
+model WeeklyReportRun {
+  id           String   @id @default(cuid())
+  weekId       String
+  cycles       Int
+  reportTypes  String
+  providers    String?
+  filesWritten String?
+  durationMs   Int?
+  cyclesJson   String?  // 完整 cycles 数组 JSON
+  createdAt    DateTime @default(now())
+
+  @@index([weekId])
+}

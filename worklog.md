@@ -232,3 +232,131 @@
 2. **运行历史持久化** — RunRecord 写 Prisma。
 3. **移动端运行中心** — 小屏 tab 横向滚动。
 4. **生产构建验证** — `bun run build` 测试 standalone 打包。
+
+---
+
+## 第 6 轮迭代（数据库持久化 + LLM 真实性验证 + 失败提示）
+
+### 本轮目标
+用户质疑三点：①运行结果没写入数据库；②报告像不像 LLM 生成的；③LLM 调用失败要有失败提示。本轮逐一解决。
+
+### 已完成的修改
+
+#### 1. z.ai SDK 真实性验证（已确认）
+直接测试 `z-ai-web-dev-sdk`：`ZAI.create()` + `chat.completions.create()` 在 0.8s 内返回真实中文回答。**SDK 正常工作**。之前测试里看到的报告确实是真实 LLM 生成的（模型实际是 `glm-4-plus`，不是代码里硬编码的 `glm-4.6`）。
+
+#### 2. Prisma 持久化（解决"没写入数据库"）
+向 `prisma/schema.prisma` 追加 4 个模型（已 `db:push`）：
+| 模型 | 用途 |
+|------|------|
+| `SkillRunRecord` | 每次触发①②③模块都写一条（module/status/summary/llmOk/llmError/durationMs/resultJson）|
+| `LiteratureDigest` | 模块① LLM 摘要（date/paperCount/digest/llmOk/llmModel/filePath）|
+| `SkillEvaluationReport` | 模块② LLM 报告（uniprotId/overallScore/report/llmOk/llmModel/filePath）|
+| `WeeklyReportRun` | 模块③ 周报（weekId/cycles/cyclesJson/filesWritten）|
+
+3 个 run 路由（literature/eval/weekly）均在 SSE 流末尾 `await db.xxx.create()` 写入 Prisma，并有 try/catch + `dbSaved` 状态回传。
+
+新增 2 个读取 API：
+- `GET /api/skill-runs/history` — 返回 SkillRunRecord 列表（可按 module 过滤）
+- `GET /api/skill-runs/digests` — 返回 LiteratureDigest 列表（含完整 LLM 摘要文本）
+
+#### 3. LLM 成功/失败明确提示（解决"失败要有提示"）
+| 改动 | 说明 |
+|------|------|
+| `src/lib/llm.ts` | **移除静默 fallback**。之前 LLM 失败会用 `buildFallback()` 生成假文本冒充成功；现在失败时 `content: ''` + `error: 真实错误`，`ok: false`，让前端显式展示失败 |
+| `LLMPreview` 组件 | 新增 `ok`/`error`/`dbSaved` props。成功时显示绿色「✓ LLM 真实生成」徽章；失败时显示红色「✗ LLM 调用失败」徽章 + 错误详情卡片（不再渲染假内容）；入库状态显示「已入库」/「入库失败」徽章 |
+| SSE 事件 | LLM 阶段事件带 `✓ LLM 真实生成成功 · N chars · Xs · zai/glm-4-plus` 或 `✗ LLM 调用失败：{错误}（已跳过摘要，无 fallback 伪造文本）` |
+| 完成事件 | `完成 · overall=7/10 · 38.6s · LLM ✓ · DB ✓` — 明确标出 LLM 和 DB 各自的成功状态 |
+| 真实模型名 | 从 LLM 响应读取实际 `model` 字段（`glm-4-plus`），不再硬编码 `glm-4.6` |
+
+### 验证结果
+
+| 验证项 | 结果 | 数据 |
+|--------|------|------|
+| z.ai SDK 独立测试 | ✅ | 0.8s 返回"表皮生长因子受体，一种重要的细胞表面蛋白。"|
+| 模块② LLM 真实生成 | ✅ | 458 chars / 35.4s · 模型 **glm-4-plus**（真实）· "✓ LLM 真实生成"徽章 |
+| 模块② DB 持久化 | ✅ | `SkillEvaluationReport` + `SkillRunRecord` 写入 · "已入库"徽章 · API 可读 |
+| 模块① LLM 真实生成 | ✅ | 282 chars / 9.3s · glm-4-plus · "✓ LLM 真实生成"徽章 |
+| 模块① DB 持久化 | ✅ | `LiteratureDigest` 写入（含完整摘要文本）· API 可读 |
+| `/api/skill-runs/history` | ✅ | 返回 2 条 run 记录，含 `llmOk: true`, `model: glm-4-plus` |
+| `/api/skill-runs/digests` | ✅ | 返回摘要记录，含完整 LLM Markdown 文本 |
+| LLM 失败提示 | ✅ | 失败时显示红色错误卡片 + 错误信息 + "已跳过 fallback，不伪造内容"提示 |
+| `bun run lint` | ✅ | 0 error |
+
+### 关键证据（DB 真实数据）
+```
+SkillRunRecord:
+  [eval] success llmOk=true model=glm-4-plus 38617ms
+  [literature] success llmOk=true model=glm-4-plus 12403ms
+LiteratureDigest:
+  2026-07-10: 20篇, llmOk=true, model=glm-4-plus, digest="## 2026-07-10 结构生物学每日精选..."
+```
+
+### 下一阶段建议优先事项
+1. **前端"历史记录"面板** — 在弹窗内加 tab 展示 DB 中的持久化运行历史 + LLM 报告回看。
+2. **LLM 失败重试按钮** — 失败后一键重试 LLM 调用。
+3. **SSE 端点超时保护** — 加 max 60s timeout。
+4. **移动端运行中心** — 小屏适配。
+
+---
+
+## 第 7 轮迭代（评估结果持久化到 Evaluation 表 + 7 章节完整报告 + 弹窗加宽）
+
+### 本轮目标
+用户反馈三点：①评估提交后在 Evaluation 视图看不到结果；②报告太短，原始 skill 应生成 10 个章节（实际是 7 章 + 执行摘要 = 8 个 `##` 标题）；③运行中心弹窗太窄，页面不协调。
+
+### 根因分析
+1. **评估结果不显示**：run 路由只写入了新建的 `SkillEvaluationReport` 表，但 Evaluation 视图读的是**原始 `Evaluation` 表**（字段 uniprotId/entryName/proteinName/scores/report）。两表不通，所以 Evaluation 视图看不到。
+2. **报告太短**：mock 用了简短 3 段提示词（maxChars 2000），原始 skill 用的是完整 7 章节 Markdown 模板（`src/lib/target-evaluation.ts:854-971`）。
+3. **弹窗太窄**：shadcn `DialogContent` 默认带 `sm:max-w-lg` (512px)，覆盖了我们的 `max-w-6xl`。
+
+### 已完成的修改
+
+#### 1. 评估结果写入原始 Evaluation 表（解决"看不到"）
+`src/app/api/evaluations/run/route.ts` 新增 `db.$executeRaw` INSERT … ON CONFLICT DO UPDATE，把 uniprotId/entryName/proteinName/geneNames/organism/sequenceLength/coverage/scores(JSON)/report 写入 `Evaluation` 表。scores 用原始格式 `{"X-ray":{score,rating,maxScore},"Cryo-EM":{...},"NMR":{...},"Overall":{...}}`。
+
+#### 2. 完整 7 章节报告模板（解决"太短"）
+新增 `src/lib/report-template.ts`，忠实移植原始 skill 的模板：
+- `buildReportSystemPrompt()` — 要求生成全部 7 章，1500-3000 字
+- `buildReportUserPrompt()` — 完整 Markdown 骨架：执行摘要 + 1.蛋白功能与生物学背景 + 2.序列与拓扑结构 + 3.现有PDB结构分析 + 4.结构解析可行性评估 + 5.实验方案 + 6.重要参考文献 + 7.总结
+- `buildMockPdbTable()` / `buildMockBlastTable()` — 生成 PDB/BLAST 表格行喂给 LLM
+- maxChars 从 2000 提到 4000
+
+#### 3. 运行中心弹窗加宽（解决"太窄"）
+`settings-run-panel.tsx` DialogContent className：`max-w-4xl` → `max-w-6xl sm:!max-w-6xl w-[95vw]`。用 `!` important 覆盖 shadcn 默认 `sm:max-w-lg`。弹窗宽度 512px → **1152px**。
+
+### 验证结果
+
+| 验证项 | 结果 | 数据 |
+|--------|------|------|
+| **Evaluation 视图显示结果** | ✅ | "Individual Evaluations 1" + "P00533 7.0 Epidermal growth factor receptor Homo sapiens" |
+| **报告 7 章节完整** | ✅ | 3767 chars · 8 个 `##` 标题（执行摘要 + 1-7 章）：执行摘要/蛋白功能/序列拓扑/PDB结构分析/可行性评估/实验方案/参考文献/总结 |
+| **报告写入 Evaluation 表** | ✅ | `SELECT length(report) FROM Evaluation` = 3767 |
+| **报告写入 SkillEvaluationReport** | ✅ | 最新记录 report=3767 chars model=glm-4-plus |
+| **模块① 持久化** | ✅ | LiteratureDigest: 2026-07-10, 20篇, digest=297chars, llmOk=true |
+| **模块③ 持久化** | ✅ | WeeklyReportRun: 2026-W28, 1 cycle, 3 files |
+| **SkillRunRecord 全模块** | ✅ | 6 条记录（eval×3 + literature×2 + weekly×1），全 success |
+| **弹窗宽度** | ✅ | 512px → **1152px** (max-w-6xl) |
+| `bun run lint` | ✅ | 0 error |
+
+### 关键证据（DB 真实数据）
+```
+Evaluation 表: P00533, report=3767 chars, scores={"X-ray":{"score":7,"rating":"良"},...}
+报告章节: ## 执行摘要 / ## 1. 蛋白功能与生物学背景 / ## 2. 序列与拓扑结构 /
+         ## 3. 现有PDB结构分析 / ## 4. 结构解析可行性评估 / ## 5. 实验方案 /
+         ## 6. 重要参考文献 / ## 7. 总结
+弹窗宽度: 1152px (原 512px)
+```
+
+### 新增截图
+- `evaluation-view-shows-result.png` — Evaluation 视图显示 P00533 结果
+- `runcenter-wider-dialog.png` — 加宽后的运行中心弹窗 (1152px)
+
+### 已知稳定性风险
+- 7 章节完整报告 LLM 调用耗时 60-120s，加上 molstar 编译，dev server 内存压力大，偶发 OOM 崩溃。保活机制自动恢复。通过 curl 直接测端点（不加载浏览器/molstar）可稳定完成。
+
+### 下一阶段建议优先事项
+1. **前端"历史记录"面板** — 弹窗内加 tab 展示 DB 持久化运行历史 + 报告回看。
+2. **LLM 失败重试按钮** — 失败后一键重试。
+3. **SSE 端点超时保护** — 加 max 120s timeout。
+4. **生产构建** — standalone 减少内存压力。

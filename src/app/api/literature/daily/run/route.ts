@@ -2,12 +2,15 @@
  * POST /api/literature/daily/run
  *
  * Skills-panel module ① — Structure-Biology Daily Literature Report.
- * SSE-streamed pipeline with real LLM (z-ai-web-dev-sdk) digest generation.
- * Pure mock data for PubMed/RCSB (no external network) so the module is
- * fully testable in the sandbox.
+ * SSE-streamed pipeline with REAL LLM (z-ai-web-dev-sdk) digest generation.
+ * PubMed/RCSB data is mock (no external network), but the LLM digest is a
+ * genuine z.ai call. Results are persisted to Prisma (LiteratureDigest +
+ * SkillRunRecord). LLM failures surface as explicit error events (no silent
+ * fallback).
  */
 import { sseStream, sleep, type SseEvent } from '@/lib/sse';
 import { generateText } from '@/lib/llm';
+import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -58,12 +61,15 @@ export async function POST(req: Request) {
     const finalCount = Object.values(methodStats).reduce((a, b) => a + b, 0);
     emit({ stage: 'method-filter', level: 'success', message: `最终入选 ${finalCount} 篇`, progress: 62 });
 
-    emit({ stage: 'llm-digest', level: 'info', message: `逐篇 LLM 中文研究概要 (${provider}/${model})`, progress: 66 });
-    await sleep(900);
-
     let digest = '';
+    let llmOk = false;
     let llmFallback = false;
+    let llmError: string | undefined;
+    let llmDurationMs = 0;
+    let actualModel = model;
+
     if (!skipWikiFiles) {
+      emit({ stage: 'llm-digest', level: 'info', message: `调用 z-ai LLM 生成每日精选摘要 (${provider})…`, progress: 66 });
       const paperTitles = Array.from({ length: Math.min(finalCount, 5) }, (_, i) =>
         `Paper #${i + 1}: ${['GPCR active-state complex', 'Kinase-inhibitor co-crystal', 'Ribosome-Sec61 translocon', 'IDR conformational ensemble', 'SARS-CoV-2 Mpro variant'][i % 5]}`,
       ).join('\n');
@@ -74,17 +80,31 @@ export async function POST(req: Request) {
         { maxChars: 1200 },
       );
       digest = digestResult.content;
+      llmOk = digestResult.ok;
       llmFallback = digestResult.fallback;
-      emit({
-        stage: 'llm-digest',
-        level: digestResult.fallback ? 'warn' : 'success',
-        message: `LLM 摘要${digestResult.fallback ? ' (fallback)' : ''} · ${digest.length} chars · ${(digestResult.durationMs / 1000).toFixed(1)}s`,
-        progress: 90,
-      });
+      llmError = digestResult.error;
+      llmDurationMs = digestResult.durationMs;
+      actualModel = digestResult.model;
 
-      emit({ stage: 'exec-summary', level: 'info', message: '生成执行摘要 + 写入 LLM-Wiki 索引', progress: 94 });
+      if (digestResult.ok) {
+        emit({
+          stage: 'llm-digest',
+          level: 'success',
+          message: `✓ LLM 真实生成成功 · ${digest.length} chars · ${(digestResult.durationMs / 1000).toFixed(1)}s · ${digestResult.provider}/${actualModel}`,
+          progress: 90,
+        });
+      } else {
+        emit({
+          stage: 'llm-digest',
+          level: 'error',
+          message: `✗ LLM 调用失败：${llmError}（已跳过摘要，无 fallback 伪造文本）`,
+          progress: 90,
+        });
+      }
+
+      emit({ stage: 'exec-summary', level: 'info', message: '写入 LLM-Wiki 索引', progress: 94 });
       await sleep(300);
-      emit({ stage: 'exec-summary', level: 'success', message: `执行摘要已生成${llmFallback ? ' (fallback)' : ''}`, progress: 97 });
+      emit({ stage: 'exec-summary', level: llmOk ? 'success' : 'warn', message: `执行摘要${llmOk ? '已生成' : '因 LLM 失败而跳过'}`, progress: 97 });
     } else {
       for (let i = 0; i < finalCount; i++) {
         await sleep(120);
@@ -92,15 +112,61 @@ export async function POST(req: Request) {
       }
     }
 
-    emit({ stage: 'write-db', level: 'info', message: '写入 PubMedArticle 表 + daily-reports 索引', progress: 99 });
-    await sleep(300);
+    // ── Persist to Prisma ─────────────────────────────────────────────
+    emit({ stage: 'write-db', level: 'info', message: '写入 Prisma (LiteratureDigest + SkillRunRecord)', progress: 99 });
+    let dbSaved = false;
+    try {
+      if (!skipWikiFiles) {
+        await db.literatureDigest.upsert({
+          where: { date },
+          create: {
+            date, paperCount: finalCount,
+            methodStats: JSON.stringify(methodStats),
+            digest: digest || '(LLM 失败，无摘要)',
+            llmOk, llmProvider: provider, llmModel: actualModel, llmDurationMs,
+            filePath: `daily-reports/structural-biology/${date}/index.md`,
+          },
+          update: {
+            paperCount: finalCount,
+            methodStats: JSON.stringify(methodStats),
+            digest: digest || '(LLM 失败，无摘要)',
+            llmOk, llmProvider: provider, llmModel: actualModel, llmDurationMs,
+            filePath: `daily-reports/structural-biology/${date}/index.md`,
+          },
+        });
+      }
+      await db.skillRunRecord.create({
+        data: {
+          module: 'literature',
+          status: llmOk || skipWikiFiles ? 'success' : 'error',
+          summary: `${date}: 候选 ${totalCandidates} → 入选 ${finalCount} 篇${llmOk ? ' · LLM ✓' : skipWikiFiles ? '' : ' · LLM ✗'}`,
+          details: JSON.stringify({ pathACount, pathBCount, finalCount, methodStats, llmOk, llmError }),
+          provider, model: actualModel,
+          llmOk: skipWikiFiles ? null : llmOk,
+          llmFallback: skipWikiFiles ? false : llmFallback,
+          llmError: skipWikiFiles ? null : llmError,
+          durationMs: Date.now() - t0,
+          resultJson: JSON.stringify({ date, finalCount, methodStats, digest: digest.slice(0, 500), llmOk }),
+        },
+      });
+      dbSaved = true;
+      emit({ stage: 'write-db', level: 'success', message: `✓ 已写入数据库 (LiteratureDigest + SkillRunRecord)`, progress: 100 });
+    } catch (err: any) {
+      emit({ stage: 'write-db', level: 'error', message: `✗ 数据库写入失败：${err?.message}`, progress: 100 });
+    }
 
     const result = {
       date, totalCandidates, pathACount, pathBCount, finalCount, methodStats,
       files: skipWikiFiles ? undefined : { dailyIndex: `daily-reports/structural-biology/${date}/index.md`, mainIndex: 'daily-reports/structural-biology/index.md' },
-      digest, llmFallback, durationMs: Date.now() - t0, provider, model,
+      digest, llmOk, llmFallback, llmError, llmModel: actualModel, llmDurationMs,
+      dbSaved, durationMs: Date.now() - t0, provider, model: actualModel,
     };
-    emit({ stage: 'done', level: 'success', message: `完成 · ${finalCount} 篇 · ${((Date.now() - t0) / 1000).toFixed(1)}s${llmFallback ? ' · LLM fallback' : ''}`, progress: 100 });
+    emit({
+      stage: 'done',
+      level: llmOk || skipWikiFiles ? 'success' : 'warn',
+      message: `完成 · ${finalCount} 篇 · ${((Date.now() - t0) / 1000).toFixed(1)}s${llmOk ? ' · LLM ✓' : skipWikiFiles ? '' : ' · LLM ✗'}${dbSaved ? ' · DB ✓' : ' · DB ✗'}`,
+      progress: 100,
+    });
     await sleep(150);
     done(result);
   })();

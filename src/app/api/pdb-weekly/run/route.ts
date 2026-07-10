@@ -7,6 +7,7 @@
  * external network) so the module is fully testable.
  */
 import { sseStream, sleep, type SseEvent } from '@/lib/sse';
+import { db } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -95,17 +96,47 @@ export async function POST(req: Request) {
       emit({ stage: `cycle-${c}-${role}`, level: 'success', message: `C${c} ${label} 完成 · ${contentChars} chars${cycleEntry.verdict ? ` · verdict=${cycleEntry.verdict}` : ''}`, progress: baseProgress + Math.round((60 / maxCycles) * 0.95) });
     }
 
-    emit({ stage: 'write-db', level: 'info', message: '写入 WeeklyReport + WeeklySnapshot + 文件落盘', progress: 95 });
+    emit({ stage: 'write-db', level: 'info', message: '写入 Prisma (WeeklyReportRun + SkillRunRecord) + 文件落盘', progress: 95 });
     await sleep(700);
     const filesWritten = [`weekly-reports/${window.weekId}/cryoem.md`, `weekly-reports/${window.weekId}/xray.md`, `weekly-reports/${window.weekId}/index.md`];
-    emit({ stage: 'write-db', level: 'success', message: `落盘 ${filesWritten.length} 个文件`, progress: 98 });
+    const providers = [...new Set(cycles.map((c) => c.provider).filter(Boolean))].join(', ');
+    let dbSaved = false;
+    try {
+      await db.weeklyReportRun.create({
+        data: {
+          weekId: window.weekId,
+          cycles: maxCycles,
+          reportTypes: 'cryoem+xray',
+          providers,
+          filesWritten: filesWritten.join('\n'),
+          durationMs: Date.now() - t0,
+          cyclesJson: JSON.stringify(cycles),
+        },
+      });
+      await db.skillRunRecord.create({
+        data: {
+          module: 'weekly',
+          status: 'success',
+          summary: `完成 ${window.weekId} · ${maxCycles} cycles · ${providers}`,
+          details: JSON.stringify({ weekId: window.weekId, cycles: cycles.length, filesWritten }),
+          provider, model,
+          llmOk: null,
+          durationMs: Date.now() - t0,
+          resultJson: JSON.stringify({ weekId: window.weekId, cycles }),
+        },
+      });
+      dbSaved = true;
+      emit({ stage: 'write-db', level: 'success', message: `✓ 已写入数据库 + 落盘 ${filesWritten.length} 个文件`, progress: 98 });
+    } catch (err: any) {
+      emit({ stage: 'write-db', level: 'error', message: `✗ 数据库写入失败：${err?.message}`, progress: 98 });
+    }
 
     const result = {
       window, reports: ['cryoem', 'xray'], cycles,
       dbCounts: { pdbStructure: fetched, weeklyReport: maxCycles, weeklySnapshot: 1, withAuthors: 165, withPubmedId: 142, pubmedArticleMatched: 138 },
-      filesWritten, durationMs: Date.now() - t0,
+      filesWritten, dbSaved, durationMs: Date.now() - t0,
     };
-    emit({ stage: 'done', level: 'success', message: `完成 · ${maxCycles} cycles · ${((Date.now() - t0) / 1000).toFixed(1)}s`, progress: 100 });
+    emit({ stage: 'done', level: 'success', message: `完成 · ${maxCycles} cycles · ${((Date.now() - t0) / 1000).toFixed(1)}s${dbSaved ? ' · DB ✓' : ' · DB ✗'}`, progress: 100 });
     await sleep(150);
     done(result);
   })();

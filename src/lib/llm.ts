@@ -39,7 +39,10 @@ export interface LlmResult {
 
 /**
  * Generate a chat completion. Always resolves (never throws) — on failure it
- * returns `ok: false` with a fallback body so callers can keep streaming.
+ * returns `ok: false` with `content: ''` and a clear `error` message, so the
+ * caller can surface the failure to the user instead of silently substituting
+ * fake text. (Previous versions generated a plausible-looking fallback body;
+ * that made LLM failures invisible. Now we fail loudly.)
  */
 export async function generateText(
   systemPrompt: string,
@@ -60,24 +63,26 @@ export async function generateText(
     });
     const content = (completion.choices?.[0]?.message?.content || '').trim();
     if (!content) {
-      throw new Error('empty response from LLM');
+      throw new Error('LLM 返回空内容（empty response）');
     }
+    // Try to read the actual model from the response; fall back to glm-4.6.
+    const actualModel = (completion as any)?.model || 'glm-4.6';
     return {
       ok: true,
       content: content.slice(0, maxChars),
       provider: 'zai',
-      model: 'glm-4.6',
+      model: actualModel,
       durationMs: Date.now() - t0,
       fallback: false,
     };
   } catch (err: any) {
     const msg = err?.message || String(err);
-    console.error('[llm] generateText failed, using fallback:', msg);
+    console.error('[llm] generateText FAILED (no fallback, surfacing error):', msg);
     return {
       ok: false,
-      content: buildFallback(systemPrompt, userPrompt).slice(0, maxChars),
+      content: '',
       provider: 'zai',
-      model: 'glm-4.6 (fallback)',
+      model: 'glm-4.6',
       durationMs: Date.now() - t0,
       fallback: true,
       error: msg,
