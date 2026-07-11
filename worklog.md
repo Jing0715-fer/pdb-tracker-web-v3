@@ -563,3 +563,36 @@ cd .next/standalone && NEXT_TELEMETRY_DISABLED=1 node server.js
 1. 周报 A-H 章节格式强制（后处理或更强 prompt）
 2. 清理 DB 中残留的旧未解码记录
 3. 前端 E/X 按钮浏览器端验证
+
+---
+
+## 第 21 轮迭代（停止任务功能）
+
+### 已完成的修改
+
+#### 停止任务功能（所有 3 个模块）
+**之前**：只有模块 ③（周报）有独立的"取消"按钮，模块 ①② 没有。
+
+**修复**：`RunButton` 组件新增 `onCancel` prop，运行时自动显示红色"停止"按钮：
+- **模块 ① 文献**：`onCancel={() => litStream.cancel()}`
+- **模块 ② 评估**：`onCancel={() => evalStream.cancel()}`
+- **模块 ③ 周报**：`onCancel={() => weeklyStream.cancel()}`（移除旧的独立取消按钮，集成到 RunButton）
+
+**实现**：
+- `useRunStream` 的 `cancel()` 调用 `AbortController.abort()`，中断 SSE 连接
+- 中断后状态变为 `done: true, ok: false, error: 'cancelled'`
+- 完成钩子触发 `markDone()`，清除运行状态
+- "停止"按钮样式：红色边框 + `XCircle` 图标 + hover 变红背景
+- tooltip："停止当前任务（后端可能在几秒后才真正停止）"
+
+### 验证结果
+
+| 验证项 | 结果 |
+|--------|------|
+| 停止按钮代码 | ✅ 3 个模块都有 `onCancel` |
+| RunButton 集成 | ✅ 运行时显示"停止"按钮 |
+| AbortController | ✅ `cancel()` 中断 SSE 连接 |
+| `bun run lint` | ✅ 0 error |
+
+### 注意
+生产 standalone 服务器处理速度快，文献模块几秒内完成，停止按钮出现时间很短。评估模块（含 LLM 报告生成 40s+）和周报（含 LLM 内容生成）运行时间更长，停止按钮可见时间更长。

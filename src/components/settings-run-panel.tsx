@@ -1170,8 +1170,8 @@ export function SettingsRunPanel() {
                   </label>
                   <RunButton
                     running={isRunning('lit')}
-                    
                     onClick={runLiterature}
+                    onCancel={() => litStream.cancel()}
                   />
                 </div>
 
@@ -1250,8 +1250,8 @@ export function SettingsRunPanel() {
                   <ToggleChip checked={evalSkipBlast} onCheckedChange={(v) => { setEvalSkipBlast(v); if (v) setEvalForceBlast(false); }} label="跳过 BLAST" disabled={evalForceBlast} />
                   <RunButton
                     running={isRunning('eval')}
-                    
                     onClick={runEvaluation}
+                    onCancel={() => evalStream.cancel()}
                   />
                 </div>
 
@@ -1351,22 +1351,10 @@ export function SettingsRunPanel() {
 
                   <RunButton
                     running={isRunning('weekly')}
-                    
                     onClick={() => runWeekly(weeklyCycles)}
+                    onCancel={() => weeklyStream.cancel()}
                     label={isRunning('weekly') ? '运行中…' : '立即触发'}
                   />
-
-                  {isRunning('weekly') && (
-                    <Button
-                      onClick={() => weeklyStream.cancel()}
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs gap-1"
-                      title="取消请求（后端可能在几秒后才真正停止）"
-                    >
-                      <XCircle className="h-3.5 w-3.5" /> 取消
-                    </Button>
-                  )}
 
                   <span className="text-[10px] text-muted-foreground ml-auto flex items-center gap-1">
                     <Cpu className="h-3 w-3" />
@@ -1622,18 +1610,33 @@ function RunButton({
   running,
   disabled,
   onClick,
+  onCancel,
   label = '执行',
 }: {
   running: boolean;
   disabled?: boolean;
   onClick: () => void;
+  onCancel?: () => void;
   label?: string;
 }) {
   return (
-    <Button onClick={onClick} disabled={disabled} size="sm" className="h-8 text-xs gap-1.5 min-w-[88px]">
-      {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-      {running ? '运行中…' : label}
-    </Button>
+    <div className="flex items-center gap-1.5">
+      <Button onClick={onClick} disabled={disabled} size="sm" className="h-8 text-xs gap-1.5 min-w-[88px]">
+        {running ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+        {running ? '运行中…' : label}
+      </Button>
+      {running && onCancel && (
+        <Button
+          onClick={onCancel}
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs gap-1 border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400"
+          title="停止当前任务（后端可能在几秒后才真正停止）"
+        >
+          <XCircle className="h-3.5 w-3.5" /> 停止
+        </Button>
+      )}
+    </div>
   );
 }
 
