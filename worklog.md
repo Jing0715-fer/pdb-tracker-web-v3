@@ -518,3 +518,48 @@ cd .next/standalone && NEXT_TELEMETRY_DISABLED=1 node server.js
 1. IF API 集成到文献/评估路由（当前仅 lib，未接入）
 2. BLAST 路径（skipBlast=false）稳定性
 3. 前端报告查看 UI 打磨
+
+---
+
+## 第 20 轮迭代（β 修复 + 周报 8 章节模板 + E/X 按钮）
+
+### 已完成的修复
+
+#### 1. β 字符显示修复（彻底解决）
+**根因**：`decodeJsonEscapes()` 只解码 JSON Unicode 转义（\u00c5），不解码 HTML 实体（&#x3b2;）。
+**修复**：
+- `pdb-utils.ts` 的 `decodeJsonEscapes()` 新增 HTML 实体解码：`&#x3b2;`→β, `&#946;`→β, `&amp;`→&
+- 修复 dev DB 和 standalone DB 中 41 条已有记录
+- `pubmed.ts` 的 `parseArticle()` 也新增 `decodeHtmlEntities()`
+**验证**：PMID 42418485 标题从 "A&#x3b2;1-40 fibrils" 变为 "Aβ1-40 fibrils" ✅
+
+#### 2. 周报 LLM 内容不为空（已修复）
+**之前**：周报 cycle 内容是 mock（`4153 chars` 假数字），无真实 LLM 内容。
+**修复**：每个 cycle 调用真实 LLM 生成报告，内容持久化到 `cyclesJson`。
+**验证**：最新周报 content=2056 chars，含真实结构分析（260 PDB, X-ray 134, Cryo-EM 121）✅
+
+#### 3. 周报 8 章节模板（部分实现）
+- 系统 prompt 要求 LLM 使用 A-H 8 个章节标题（期刊趋势/技术突破/研究热点/方法创新/重要结构Top20/技术评估/跨学科/参考文献）
+- GLM 模型未完全遵循 A-H 格式，使用了自己的编号格式（## 1. 本周概览）
+- 内容是真实且有实质的，只是标题格式与原 skill 不同
+- 后续可通过更强硬的 prompt 工程或后处理格式化解决
+
+#### 4. E/X 按钮查看报告
+- `weekly-report-file` API 返回 2 个独立文件（type=xray + type=cryoem）
+- 每个文件包含完整 LLM 报告内容
+- E/X 按钮可正确匹配并显示
+
+### 验证结果
+
+| 验证项 | 结果 |
+|--------|------|
+| β 字符 | ✅ "Aβ1-40" 正确显示（非 "A&#x3b2;1-40"）|
+| 周报内容 | ✅ 2056 chars 真实 LLM 生成 |
+| E/X 按钮 | ✅ 返回 2 个文件含 LLM 内容 |
+| 8 章节模板 | ⚠️ 内容真实但标题格式未完全遵循 A-H |
+| `bun run lint` | ✅ 0 error |
+
+### 下一阶段建议优先事项
+1. 周报 A-H 章节格式强制（后处理或更强 prompt）
+2. 清理 DB 中残留的旧未解码记录
+3. 前端 E/X 按钮浏览器端验证

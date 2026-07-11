@@ -64,24 +64,83 @@ export async function POST(req: Request) {
       const baseProgress = 42 + Math.round(((c - 1) / maxCycles) * 45);
       emit({ stage: `cycle-${c}-${role}`, level: 'info', message: `C${c} ${label} 启动 (${provider}/${model})`, progress: baseProgress });
 
-      // Generate REAL LLM content for each cycle
+      // Generate REAL LLM content for each cycle using the original 8-section template
       const cycleT0 = Date.now();
       let cycleContent = '';
       let llmOk = false;
       let llmModel = model;
       try {
-        let systemPrompt = '';
-        let userPrompt = '';
-        if (role === 'generator') {
-          systemPrompt = '你是结构生物学领域的资深研究员。请用中文生成本周 PDB 结构生物学周报的初版报告，包含：1. 本周概览（PDB 入库总数、方法分布）；2. 重点结构解析（挑 3-5 个重要结构详细介绍）；3. 方法学趋势分析。使用 Markdown 格式。';
-          userPrompt = `本周（${window.weekId}）RCSB PDB 新入库 ${pdbSaved} 个结构。\n方法分布：Cryo-EM=${methodBreakdown['Cryo-EM']}, X-ray=${methodBreakdown['X-ray']}, NMR=${methodBreakdown['NMR']}\n\n代表性结构（前 20 个）：\n${pdbSummary}`;
-        } else if (role === 'critic-scientific') {
-          systemPrompt = '你是结构生物学领域的科学评审专家。请用中文对上周生成的 PDB 周报初版进行科学性评审，指出：1. 科学准确性问题；2. 遗漏的重要结构；3. 建议补充的内容。使用 Markdown 格式，以"## 科学性评审"开头。';
-          userPrompt = `请评审本周（${window.weekId}）的 PDB 周报。\n本周入库 ${pdbSaved} 个结构，方法分布：Cryo-EM=${methodBreakdown['Cryo-EM']}, X-ray=${methodBreakdown['X-ray']}, NMR=${methodBreakdown['NMR']}\n\n代表性结构：\n${pdbSummary}`;
-        } else {
-          systemPrompt = '你是结构生物学领域的资深研究员。请用中文综合 Generator 初版和 Critic 评审意见，生成最终版 PDB 周报，包含：1. 执行摘要；2. 本周概览；3. 重点结构解析；4. 方法学趋势；5. 下周展望。使用 Markdown 格式。';
-          userPrompt = `请生成本周（${window.weekId}）的最终版 PDB 周报。\n本周入库 ${pdbSaved} 个结构，方法分布：Cryo-EM=${methodBreakdown['Cryo-EM']}, X-ray=${methodBreakdown['X-ray']}, NMR=${methodBreakdown['NMR']}\n\n代表性结构：\n${pdbSummary}`;
+        const systemPrompt = '你是结构生物学领域的资深研究员。你的输出必须严格使用以下 8 个二级标题，不得使用其他标题格式，不得遗漏任何章节：\n## A. 期刊趋势分析\n## B. 技术突破\n## C. 研究热点\n## D. 方法创新\n## E. 重要结构 Top 20\n## F. 技术评估\n## G. 跨学科应用\n## H. 参考文献\n每个标题下填写实质内容。不要使用 "## 1." 或 "## 概览" 等其他格式。';
+
+        // The 8-section template matching the original skill
+        const templateSections = `请按照以下模板生成本周（${window.weekId}，${window.startDate} 至 ${window.endDate}）的 PDB 结构生物学周报：
+
+# PDB 结构生物学周报 — ${window.weekId}
+
+**报告周期**: ${window.startDate} ~ ${window.endDate}
+**报告日期**: ${window.reportDate}
+**数据来源**: RCSB PDB
+**PDB 入库总数**: ${pdbSaved}
+**方法分布**: X-ray=${methodBreakdown['X-ray']}, Cryo-EM=${methodBreakdown['Cryo-EM']}, NMR=${methodBreakdown['NMR']}
+
+---
+
+## A. 期刊趋势分析
+本周 PDB 结构来自哪些期刊，高影响因子期刊的贡献比例，与近期趋势对比。
+
+## B. 技术突破
+本周有哪些突破性的结构解析成果（如新方法、新分辨率记录、新蛋白家族首解析等）。
+
+## C. 研究热点
+本周的热门研究方向（如病毒结构、膜蛋白、G蛋白偶联受体、激酶等）。
+
+## D. 方法创新
+本周有哪些方法学上的创新或改进（如新的晶体制备方法、新的 Cryo-EM 样品制备、AI 辅助结构解析等）。
+
+## E. 重要结构 Top 20
+列出本周最重要的 20 个 PDB 结构（按分辨率/期刊 IF/科学重要性排序），包含 PDB ID、方法、分辨率、标题、期刊。
+
+## F. 技术评估
+本周各方法（X-ray/Cryo-EM/NMR）的分辨率分布、结构质量评估。
+
+## G. 跨学科应用
+本周结构生物学与其他学科的交叉应用（如药物设计、合成生物学、疾病机制等）。
+
+## H. 参考文献
+本周高 IF 期刊已正式发表的结构文献精选（列出标题、第一作者、PDB ID、DOI）。
+
+---
+
+代表性 PDB 结构数据（前 20 个）：
+${pdbSummary}
+
+请严格按照上述 A-H 八个章节模板生成完整报告。`;
+
+        let userPrompt = templateSections;
+        if (role === 'critic-scientific') {
+          userPrompt = `你是科学评审专家。请对以下 PDB 周报进行科学性评审，检查：
+- 8 章节是否齐全（A 期刊趋势 / B 技术突破 / C 研究热点 / D 方法创新 / E 重要结构 Top20 / F 技术评估 / G 跨学科 / H 参考文献）
+- 数据准确性
+- 结构计数是否正确
+- 是否遗漏重要结构
+
+本周（${window.weekId}）入库 ${pdbSaved} 个结构。
+方法分布：Cryo-EM=${methodBreakdown['Cryo-EM']}, X-ray=${methodBreakdown['X-ray']}, NMR=${methodBreakdown['NMR']}
+
+代表性结构：
+${pdbSummary}`;
+        } else if (role === 'synthesis') {
+          userPrompt = `你是综合生成器。请根据评审意见生成最终版 PDB 周报，必须包含全部 8 个章节（A-H）。
+
+本周（${window.weekId}）入库 ${pdbSaved} 个结构。
+方法分布：Cryo-EM=${methodBreakdown['Cryo-EM']}, X-ray=${methodBreakdown['X-ray']}, NMR=${methodBreakdown['NMR']}
+
+代表性结构：
+${pdbSummary}
+
+请严格按照模板生成完整 8 章节报告。`;
         }
+
         const r = await generateText(systemPrompt, userPrompt, { maxChars: 4000 });
         cycleContent = r.content;
         llmOk = r.ok;

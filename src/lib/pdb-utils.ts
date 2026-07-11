@@ -1,6 +1,6 @@
 import { PdbEntry, QualityScoreResult, TagCategory, TagInfo } from './pdb-types';
 
-// Decode JSON Unicode escape sequences (e.g. \u00c5 → Å)
+// Decode JSON Unicode escape sequences (e.g. \u00c5 → Å) AND HTML entities (e.g. &#x3b2; → β)
 export function decodeJsonEscapes(str: string | null | undefined): string {
   if (!str) return str ?? '';
   return str
@@ -10,7 +10,18 @@ export function decodeJsonEscapes(str: string | null | undefined): string {
     .replace(/\\u00fc/gi, 'ü')
     .replace(/\\u00e4/gi, 'ä')
     .replace(/\\u00f6/gi, 'ö')
-    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)));
+    .replace(/\\u([0-9a-fA-F]{4})/g, (_, code) => String.fromCharCode(parseInt(code, 16)))
+    // HTML hex entities: &#x3b2; → β, &#x2011; → ‑
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    // HTML decimal entities: &#946; → β
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    // Named entities
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'");
 }
 
 // Safe number formatting
