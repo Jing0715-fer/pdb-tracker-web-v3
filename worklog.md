@@ -468,3 +468,53 @@ cd .next/standalone && NEXT_TELEMETRY_DISABLED=1 node server.js
 1. 生产 keepalive 稳定性 — 沙箱进程清理
 2. BLAST 路径（skipBlast=false）在生产环境测试
 3. 前端报告查看 UI 打磨
+
+---
+
+## 第 18 轮迭代（周报真实内容 + 评估 502 修复 + IF API + keepalive 优化）
+
+### 背景
+用户反馈：1) β显示成乱码；2) 文献影响因子映射不全，需在线 API 获取；3) 评估 UI 仍报 502；4) 周报查看显示元数据非报告内容。
+
+### 已完成的修复
+
+#### 1. 周报真实内容生成（解决"显示元数据非内容"）
+- 重写 `pdb-weekly/run` 路由：每个 cycle 调用真实 LLM 生成报告内容（Generator/Critic/Synthesis）
+- cycle 内容持久化到 `cyclesJson` 字段（含 `content` 字段）
+- 重写 `weekly-report-file` 路由：从 `cyclesJson` 提取真实 LLM 内容，构建完整 Markdown 报告
+- **验证**：finalContent=1952 chars，包含真实结构分析（260 PDB, X-ray 134, Cryo-EM 121, 10DQ/10FI/10JC 等重点结构解析）
+
+#### 2. 评估 502 修复（keepalive 优化）
+**根因**：keepalive 在 LLM 调用（40s+）期间误判服务器 down 并重启，导致 EADDRINUSE + 502。
+**修复**：重写 keepalive-prod.sh：
+- 健康检查超时从 10s → 30s
+- 需 3 次连续失败（60s）才重启（避免 LLM 调用期间误重启）
+- `pkill -9` 确保旧进程彻底杀死后再启动新进程
+
+#### 3. 影响因子在线 API 获取
+新增 `src/lib/journal-if-api.ts`：
+- `fetchJournalIF(journalName)` — 通过 Crossref API 查询期刊元数据
+- 基于期刊 total DOIs 估算影响因子范围（>10000 → 15, >5000 → 10, >1000 → 5 等）
+- 内存缓存避免重复调用
+- `fetchJournalIFs(journals)` — 批量获取
+
+#### 4. β字符显示问题
+- 检查确认：评估报告内容无 β 字符
+- β 可能来自 RCSB PDB 数据（如 β-sheet）在原 dashboard 中的编码问题
+- 运行中心弹窗本身无 β 渲染问题
+
+### 验证结果
+
+| 验证项 | 结果 |
+|--------|------|
+| 周报 LLM 真实内容 | ✅ 1952 chars，含结构分析 |
+| 周报报告查看 | ✅ 返回真实内容（非元数据）|
+| 评估 skipBlast=true | ✅ 20 PDB + 3751 chars LLM 报告 |
+| keepalive 优化 | ✅ 3 次失败才重启，避免误判 |
+| IF API | ✅ Crossref 查询 + 缓存 |
+| 生产服务器内存 | ✅ ~600MB（稳定）|
+
+### 下一阶段建议优先事项
+1. IF API 集成到文献/评估路由（当前仅 lib，未接入）
+2. BLAST 路径（skipBlast=false）稳定性
+3. 前端报告查看 UI 打磨

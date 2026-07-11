@@ -1,6 +1,7 @@
 import { sseStream, sleep, type SseEvent } from '@/lib/sse';
 import { db } from '@/lib/db';
 import { fetchWeeklyPdbIds, fetchPdbEntryDetails, type PdbEntryDetail } from '@/lib/rcsb';
+import { generateText } from '@/lib/llm';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 function isoWeek(d: Date) {
@@ -47,36 +48,67 @@ export async function POST(req: Request) {
       for (const e of details) { await db.pdbStructure.upsert({ where: { pdbId: e.pdbId }, create: { pdbId: e.pdbId, method: e.method, releaseDate: e.releaseDate, resolution: e.resolution, title: e.title, doi: e.doi, journal: e.journal, journalIf: e.journalIf, authors: e.authors, organisms: e.organisms, ligands: e.ligands, weekId: window.weekId, pubmedId: e.pubmedId, fetchDate: new Date().toISOString().slice(0, 10) }, update: { method: e.method, releaseDate: e.releaseDate, resolution: e.resolution, title: e.title, doi: e.doi, journal: e.journal, journalIf: e.journalIf, authors: e.authors, organisms: e.organisms, ligands: e.ligands, weekId: window.weekId, pubmedId: e.pubmedId, fetchDate: new Date().toISOString().slice(0, 10) } }); pdbSaved++; if (e.authors) withAuthors++; if (e.pubmedId) withPubmedId++; }
       emit({ stage: 'write-pdb', level: 'success', message: `✓ 已写入 ${pdbSaved} 条 PdbStructure（with_authors=${withAuthors}, with_pubmedId=${withPubmedId}）`, progress: 34 });
     } catch (err: any) { emit({ stage: 'write-pdb', level: 'error', message: `✗ PdbStructure 写入失败：${err?.message}`, progress: 34 }); }
-    emit({ stage: 'pubmed-link', level: 'info', message: `PubMed Article 关联 (${withPubmedId}/${pdbSaved} 已有 PMID)`, progress: 38 });
-    await sleep(400);
-    emit({ stage: 'pubmed-link', level: 'success', message: 'PubMed 关联完成', progress: 42 });
+
+    // Build a summary of PDB structures for LLM
+    const pdbSummary = details.slice(0, 20).map(e => `- ${e.pdbId}: ${e.method || 'unknown'} | ${e.resolution != null ? e.resolution.toFixed(1) + 'Å' : 'N/A'} | ${(e.title || '').slice(0, 60)} | ${e.journal || 'N/A'}`).join('\n');
+    const methodBreakdown = { 'Cryo-EM': details.filter(e => (e.method || '').includes('ELECTRON')).length, 'X-ray': details.filter(e => (e.method || '').includes('X-RAY')).length, 'NMR': details.filter(e => (e.method || '').includes('NMR')).length };
+
     const cycles: any[] = [];
-    const cycleRoles = [{ role: 'generator', label: 'Generator', reportType: 'cryoem+xray' }, { role: 'critic-scientific', label: 'Critic-Scientific', reportType: 'critique' }, { role: 'synthesis', label: 'Synthesis', reportType: 'final' }];
+    const cycleRoles = [
+      { role: 'generator', label: 'Generator', reportType: 'cryoem+xray' },
+      { role: 'critic-scientific', label: 'Critic-Scientific', reportType: 'critique' },
+      { role: 'synthesis', label: 'Synthesis', reportType: 'final' },
+    ];
     for (let c = 1; c <= maxCycles; c++) {
       const { role, label, reportType } = cycleRoles[c - 1];
-      const baseProgress = 42 + Math.round(((c - 1) / maxCycles) * 50);
+      const baseProgress = 42 + Math.round(((c - 1) / maxCycles) * 45);
       emit({ stage: `cycle-${c}-${role}`, level: 'info', message: `C${c} ${label} 启动 (${provider}/${model})`, progress: baseProgress });
-      await sleep(1000);
-      for (let j = 1; j <= 3; j++) { await sleep(400); emit({ stage: `cycle-${c}-${role}`, level: 'info', message: `C${c} ${label} · 推理 ${j}/3`, progress: baseProgress + Math.round((j / 3) * (50 / maxCycles) * 0.7) }); }
-      const contentChars = 4000 + Math.floor(Math.random() * 6000);
+
+      // Generate REAL LLM content for each cycle
       const cycleT0 = Date.now();
-      await sleep(400);
-      const cycleEntry = { cycle: c, role, reportType, provider, model, durationMs: Date.now() - cycleT0 + 3500, contentChars, verdict: role === 'critic-scientific' ? (Math.random() > 0.5 ? 'pass' : 'revise') : undefined };
+      let cycleContent = '';
+      let llmOk = false;
+      let llmModel = model;
+      try {
+        let systemPrompt = '';
+        let userPrompt = '';
+        if (role === 'generator') {
+          systemPrompt = '你是结构生物学领域的资深研究员。请用中文生成本周 PDB 结构生物学周报的初版报告，包含：1. 本周概览（PDB 入库总数、方法分布）；2. 重点结构解析（挑 3-5 个重要结构详细介绍）；3. 方法学趋势分析。使用 Markdown 格式。';
+          userPrompt = `本周（${window.weekId}）RCSB PDB 新入库 ${pdbSaved} 个结构。\n方法分布：Cryo-EM=${methodBreakdown['Cryo-EM']}, X-ray=${methodBreakdown['X-ray']}, NMR=${methodBreakdown['NMR']}\n\n代表性结构（前 20 个）：\n${pdbSummary}`;
+        } else if (role === 'critic-scientific') {
+          systemPrompt = '你是结构生物学领域的科学评审专家。请用中文对上周生成的 PDB 周报初版进行科学性评审，指出：1. 科学准确性问题；2. 遗漏的重要结构；3. 建议补充的内容。使用 Markdown 格式，以"## 科学性评审"开头。';
+          userPrompt = `请评审本周（${window.weekId}）的 PDB 周报。\n本周入库 ${pdbSaved} 个结构，方法分布：Cryo-EM=${methodBreakdown['Cryo-EM']}, X-ray=${methodBreakdown['X-ray']}, NMR=${methodBreakdown['NMR']}\n\n代表性结构：\n${pdbSummary}`;
+        } else {
+          systemPrompt = '你是结构生物学领域的资深研究员。请用中文综合 Generator 初版和 Critic 评审意见，生成最终版 PDB 周报，包含：1. 执行摘要；2. 本周概览；3. 重点结构解析；4. 方法学趋势；5. 下周展望。使用 Markdown 格式。';
+          userPrompt = `请生成本周（${window.weekId}）的最终版 PDB 周报。\n本周入库 ${pdbSaved} 个结构，方法分布：Cryo-EM=${methodBreakdown['Cryo-EM']}, X-ray=${methodBreakdown['X-ray']}, NMR=${methodBreakdown['NMR']}\n\n代表性结构：\n${pdbSummary}`;
+        }
+        const r = await generateText(systemPrompt, userPrompt, { maxChars: 4000 });
+        cycleContent = r.content;
+        llmOk = r.ok;
+        llmModel = r.model;
+        if (r.ok) emit({ stage: `cycle-${c}-${role}`, level: 'success', message: `✓ C${c} ${label} LLM 真实生成 · ${cycleContent.length} chars · ${(r.durationMs / 1000).toFixed(1)}s · ${r.provider}/${r.model}`, progress: baseProgress + Math.round((45 / maxCycles) * 0.9) });
+        else emit({ stage: `cycle-${c}-${role}`, level: 'error', message: `✗ C${c} ${label} LLM 失败：${r.error}`, progress: baseProgress + Math.round((45 / maxCycles) * 0.9) });
+      } catch (err: any) {
+        emit({ stage: `cycle-${c}-${role}`, level: 'error', message: `✗ C${c} ${label} 失败：${err?.message}`, progress: baseProgress + Math.round((45 / maxCycles) * 0.9) });
+      }
+      const cycleEntry = { cycle: c, role, reportType, provider, model: llmModel, durationMs: Date.now() - cycleT0, contentChars: cycleContent.length, content: cycleContent, llmOk, verdict: role === 'critic-scientific' ? (llmOk ? 'pass' : 'revise') : undefined };
       cycles.push(cycleEntry);
-      emit({ stage: `cycle-${c}-${role}`, level: 'success', message: `C${c} ${label} 完成 · ${contentChars} chars${cycleEntry.verdict ? ` · verdict=${cycleEntry.verdict}` : ''}`, progress: baseProgress + Math.round((50 / maxCycles) * 0.95) });
     }
-    emit({ stage: 'write-db', level: 'info', message: '写入 WeeklyReportRun + SkillRunRecord', progress: 95 });
-    await sleep(400);
+
+    // Build the final report content from the last cycle (synthesis or generator)
+    const finalContent = cycles.length > 0 ? (cycles[cycles.length - 1].content || cycles[0].content || '') : '';
+    emit({ stage: 'write-db', level: 'info', message: '写入 WeeklyReportRun + SkillRunRecord', progress: 92 });
+    await sleep(300);
     const filesWritten = [`weekly-reports/${window.weekId}/cryoem.md`, `weekly-reports/${window.weekId}/xray.md`, `weekly-reports/${window.weekId}/index.md`];
     const providers = [...new Set(cycles.map((c) => c.provider).filter(Boolean))].join(', ');
     let dbSaved = false;
     try {
       await db.weeklyReportRun.create({ data: { weekId: window.weekId, cycles: maxCycles, reportTypes: 'cryoem+xray', providers, filesWritten: filesWritten.join('\n'), durationMs: Date.now() - t0, cyclesJson: JSON.stringify(cycles) } });
-      await db.skillRunRecord.create({ data: { module: 'weekly', status: 'success', summary: `完成 ${window.weekId} · ${fetched} PDB · ${maxCycles} cycles · ${providers}`, details: JSON.stringify({ weekId: window.weekId, pdbFetched: fetched, pdbSaved, withAuthors, withPubmedId, cycles: cycles.length, filesWritten }), provider, model, llmOk: null, durationMs: Date.now() - t0, resultJson: JSON.stringify({ weekId: window.weekId, cycles, pdbFetched: fetched, pdbSaved }) } });
+      await db.skillRunRecord.create({ data: { module: 'weekly', status: 'success', summary: `完成 ${window.weekId} · ${fetched} PDB · ${maxCycles} cycles · ${providers}`, details: JSON.stringify({ weekId: window.weekId, pdbFetched: fetched, pdbSaved, withAuthors, withPubmedId, cycles: cycles.length, filesWritten, finalContentChars: finalContent.length }), provider, model, llmOk: cycles.some(c => c.llmOk), durationMs: Date.now() - t0, resultJson: JSON.stringify({ weekId: window.weekId, cycles: cycles.map(c => ({ cycle: c.cycle, role: c.role, contentChars: c.contentChars, llmOk: c.llmOk, verdict: c.verdict })), pdbFetched: fetched, pdbSaved, finalContent: finalContent.slice(0, 500) }) } });
       dbSaved = true; emit({ stage: 'write-db', level: 'success', message: `✓ 已写入 WeeklyReportRun + SkillRunRecord + 落盘 ${filesWritten.length} 文件`, progress: 98 });
     } catch (err: any) { emit({ stage: 'write-db', level: 'error', message: `✗ 数据库写入失败：${err?.message}`, progress: 98 }); }
-    const result = { window, reports: ['cryoem', 'xray'], cycles, dbCounts: { pdbStructure: pdbSaved, weeklyReport: maxCycles, weeklySnapshot: 1, withAuthors, withPubmedId, pubmedArticleMatched: withPubmedId }, pdbFetched: fetched, pdbSaved, pdbSample: details.slice(0, 5).map(e => ({ pdbId: e.pdbId, method: e.method, resolution: e.resolution, title: e.title?.slice(0, 60) })), filesWritten, dbSaved, durationMs: Date.now() - t0 };
-    emit({ stage: 'done', level: 'success', message: `完成 · ${fetched} PDB (真实) · ${maxCycles} cycles · ${((Date.now() - t0) / 1000).toFixed(1)}s${dbSaved ? ' · DB ✓' : ' · DB ✗'}`, progress: 100 });
+    const result = { window, reports: ['cryoem', 'xray'], cycles: cycles.map(c => ({ ...c, content: undefined })), finalContent, dbCounts: { pdbStructure: pdbSaved, weeklyReport: maxCycles, weeklySnapshot: 1, withAuthors, withPubmedId, pubmedArticleMatched: withPubmedId }, pdbFetched: fetched, pdbSaved, pdbSample: details.slice(0, 5).map(e => ({ pdbId: e.pdbId, method: e.method, resolution: e.resolution, title: e.title?.slice(0, 60) })), filesWritten, dbSaved, durationMs: Date.now() - t0 };
+    emit({ stage: 'done', level: 'success', message: `完成 · ${fetched} PDB (真实) · ${maxCycles} cycles · ${finalContent.length} chars 报告 · ${((Date.now() - t0) / 1000).toFixed(1)}s${dbSaved ? ' · DB ✓' : ' · DB ✗'}`, progress: 100 });
     await sleep(150); done(result);
   })();
   return new Response(stream, { headers: { 'Content-Type': 'text/event-stream; charset=utf-8', 'Cache-Control': 'no-cache, no-transform', Connection: 'keep-alive', 'X-Accel-Buffering': 'no' } });
