@@ -1246,8 +1246,8 @@ export function SettingsRunPanel() {
                       <Input type="number" min={1} max={500} value={evalMaxPdb} onChange={e => setEvalMaxPdb(parseInt(e.target.value || '80'))} className="h-8 text-xs" />
                     </Field>
                   </div>
-                  <ToggleChip checked={evalForceBlast} onCheckedChange={setEvalForceBlast} label="forceBlast" />
-                  <ToggleChip checked={evalSkipBlast} onCheckedChange={setEvalSkipBlast} label="skipBlast" />
+                  <ToggleChip checked={evalForceBlast} onCheckedChange={(v) => { setEvalForceBlast(v); if (v) setEvalSkipBlast(false); }} label="强制 BLAST" disabled={evalSkipBlast} />
+                  <ToggleChip checked={evalSkipBlast} onCheckedChange={(v) => { setEvalSkipBlast(v); if (v) setEvalForceBlast(false); }} label="跳过 BLAST" disabled={evalForceBlast} />
                   <RunButton
                     running={isRunning('eval')}
                     
@@ -1641,14 +1641,16 @@ function ToggleChip({
   checked,
   onCheckedChange,
   label,
+  disabled,
 }: {
   checked: boolean;
   onCheckedChange: (v: boolean) => void;
   label: string;
+  disabled?: boolean;
 }) {
   return (
-    <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer pb-1.5">
-      <Switch checked={checked} onCheckedChange={onCheckedChange} className="scale-90" />
+    <label className={`flex items-center gap-1.5 text-xs text-muted-foreground pb-1.5 ${disabled ? 'opacity-40 pointer-events-none' : 'cursor-pointer'}`}>
+      <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} className="scale-90" />
       <span className="font-mono text-[11px]">{label}</span>
     </label>
   );

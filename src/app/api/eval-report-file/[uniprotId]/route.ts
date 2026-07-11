@@ -1,41 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
-import * as fs from 'fs';
-import * as path from 'path';
-
-const EVALS_DIR = '/Users/lijing/Documents/my_note/LLM-Wiki/wiki/evaluations';
-
-export async function GET(
-  request: NextRequest,
-  { params }: { params: Promise<{ uniprotId: string }> }
-) {
+import { db } from '@/lib/db';
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export async function GET(request: NextRequest, { params }: { params: Promise<{ uniprotId: string }> }) {
   try {
     const { uniprotId } = await params;
-    
-    // Read the directory to find matching file
-    let files: string[];
-    try {
-      files = fs.readdirSync(EVALS_DIR);
-    } catch {
-      return NextResponse.json({ error: 'Evaluations directory not found' }, { status: 404 });
+    const report = await db.skillEvaluationReport.findFirst({ where: { uniprotId }, orderBy: { createdAt: 'desc' } });
+    if (!report || !report.report) {
+      const evalRow = await db.$queryRaw<any[]>`SELECT uniprotId, proteinName, report FROM Evaluation WHERE uniprotId = ${uniprotId}`;
+      if (evalRow.length > 0 && evalRow[0].report) {
+        return NextResponse.json({ uniprotId, proteinName: evalRow[0].proteinName, filename: `${uniprotId}_evaluation.md`, content: evalRow[0].report, source: 'Evaluation table' });
+      }
+      return NextResponse.json({ error: `Evaluation report not found for ${uniprotId}` }, { status: 404 });
     }
-    
-    // Find file matching the uniprotId (e.g., P00533_EGFR_结构可行性评估.md)
-    const matchingFile = files.find(f => f.startsWith(uniprotId + '_') && f.endsWith('_结构可行性评估.md'));
-    
-    if (!matchingFile) {
-      return NextResponse.json({ error: 'Evaluation report file not found' }, { status: 404 });
-    }
-    
-    const filePath = path.join(EVALS_DIR, matchingFile);
-    const content = fs.readFileSync(filePath, 'utf-8');
-    
-    return NextResponse.json({
-      uniprotId,
-      filename: matchingFile,
-      content,
-    });
-  } catch (error) {
-    console.error('Error reading evaluation report:', error);
-    return NextResponse.json({ error: 'Failed to read evaluation report' }, { status: 500 });
+    return NextResponse.json({ uniprotId, proteinName: report.proteinName, filename: report.filePath || `${uniprotId}_evaluation.md`, content: report.report, llmModel: report.llmModel, llmOk: report.llmOk, overallScore: report.overallScore, createdAt: report.createdAt.toISOString(), source: 'SkillEvaluationReport table' });
+  } catch (error: any) {
+    console.error('[eval-report-file] Error:', error);
+    return NextResponse.json({ error: 'Failed to fetch evaluation report: ' + (error?.message || 'unknown') }, { status: 500 });
   }
 }
