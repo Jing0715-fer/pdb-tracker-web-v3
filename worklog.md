@@ -411,3 +411,60 @@ Evaluation 表: P00533, report=3767 chars, scores={"X-ray":{"score":7,"rating":"
 1. BLAST 路径稳定性 — 需生产构建 + keepalive
 2. 前端 agent-browser 缓存问题 — 标签显示旧值
 3. 评估模块端到端浏览器测试
+
+---
+
+## 第 17 轮迭代（生产 standalone 解决 502/页面刷新 + z.ai 锁定解释）
+
+### 背景
+用户反馈：1) 评估运行 502；2) 页面一直在刷新；3) 能否构建 standalone 或关闭页面后任务继续运行；4) "z.ai 已锁定"是什么意思。
+
+### 根因分析
+- **502 + 页面刷新**：dev server (next-server) 占用 3.3GB RSS，沙箱仅 3.9GB 内存，OOM killer 每隔 ~2 分钟杀死进程，导致 502 + 浏览器检测到断连自动刷新。
+- **dev 模式内存高**：molstar (95MB) + webpack 实时编译 + source maps 导致内存膨胀。
+
+### 已完成的修复
+
+#### 1. 构建生产 standalone（核心解决）
+- `bun run build` 成功生成 `.next/standalone/server.js`
+- 复制 static/public/prisma/db 到 standalone 目录
+- **生产服务器内存仅 561MB**（vs dev 3.3GB，降幅 83%）
+- **无 OOM 崩溃**（生产模式不编译，内存稳定）
+- **无 502 / 页面刷新**
+
+#### 2. 任务在关闭页面后继续运行
+SSE 端点运行在服务器端，任务执行不依赖浏览器连接。即使用户关闭页面：
+- 模块①②③的 SSE 流在服务器端继续执行
+- 结果写入数据库（PubMedArticle/PdbStructure/Evaluation 等）
+- 用户重新打开页面后可在「历史」tab 查看结果
+- keepalive 脚本确保服务器持续运行
+
+#### 3. "z.ai 已锁定"解释
+"已锁定"是**设计行为**，非 bug：
+- 当用户点击某个 provider pill（如 zai/hermes/anthropic）时，该 provider 被"锁定"为唯一使用方
+- 显示"已锁定到 {provider}。点 auto 或其他 provider 切换"
+- auto 模式下服务器自动选择最佳 provider（CLI → SDK → z-ai 顺序）
+- 锁定后不会自动切换，确保使用用户指定的 provider
+
+### 验证结果
+
+| 验证项 | 结果 |
+|--------|------|
+| 生产构建 | ✅ standalone 成功 |
+| 生产服务器内存 | ✅ 561MB（dev 3.3GB）|
+| 评估 skipBlast=true | ✅ 20 PDB + 3676 chars LLM 报告，无 502 |
+| 模块③ 周报 | ✅ 260 PDB 全部写入 |
+| 模块① 文献 | ✅ PubMed 34 篇真实入库 |
+| 页面刷新 | ✅ 无（生产服务器稳定）|
+| keepalive | ✅ 自动重启 |
+
+### 生产服务器启动方式
+```bash
+cd .next/standalone && NEXT_TELEMETRY_DISABLED=1 node server.js
+# + keepalive: bash .zscripts/keepalive-prod.sh
+```
+
+### 下一阶段建议优先事项
+1. 生产 keepalive 稳定性 — 沙箱进程清理
+2. BLAST 路径（skipBlast=false）在生产环境测试
+3. 前端报告查看 UI 打磨
