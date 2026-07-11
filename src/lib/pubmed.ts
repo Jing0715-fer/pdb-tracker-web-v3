@@ -1,4 +1,21 @@
 const EUTILS = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils';
+
+/** Decode HTML entities in PubMed XML content (e.g. &#x3b2; → β, &#x2011; → ‑). */
+function decodeHtmlEntities(str: string): string {
+  if (!str) return str;
+  return str
+    // Hex entities: &#x3b2; → β
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    // Decimal entities: &#946; → β
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)))
+    // Named entities
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#039;/g, "'")
+    .replace(/&apos;/g, "'");
+}
 export interface FetchedPaper { pmid: string; title: string; authors: string; journal: string; abstract: string; pubYear: string; pubMonth: string; pubDay: string; doi: string; }
 export const PATH_A_QUERY = `(("cryo-electron microscopy"[MeSH Terms] OR "cryo-EM"[Title/Abstract] OR "X-ray crystallography"[MeSH Terms] OR "crystallography, X-Ray"[Title/Abstract] OR "nuclear magnetic resonance, biomolecular"[MeSH Terms] OR "NMR"[Title/Abstract] OR "AlphaFold"[Title/Abstract]) AND ("protein structure"[MeSH Terms] OR "protein conformation"[MeSH Terms] OR "structural biology"[Title/Abstract] OR "macromolecular structure"[Title/Abstract] OR "protein structure"[Title/Abstract]))`;
 export const PATH_B_QUERY = `(("Nature"[Journal] OR "Science"[Journal] OR "Cell"[Journal] OR "Nature Communications"[Journal] OR "Nature Structural & Molecular Biology"[Journal] OR "Nature Methods"[Journal] OR "Nature Biotechnology"[Journal] OR "Molecular Cell"[Journal] OR "Cell Research"[Journal] OR "PNAS"[Journal] OR "Proceedings of the National Academy of Sciences"[Journal] OR "Science Advances"[Journal] OR "Cell Host & Microbe"[Journal] OR "Structure"[Journal] OR "Current Biology"[Journal] OR "eLife"[Journal] OR "PLOS Biology"[Journal]) AND ("cryo-EM"[Title/Abstract] OR "cryo-electron microscopy"[Title/Abstract] OR "X-ray crystallography"[Title/Abstract] OR "X-ray structure"[Title/Abstract] OR "NMR"[Title/Abstract] OR "AlphaFold"[Title/Abstract] OR "protein structure"[Title/Abstract] OR "structural biology"[Title/Abstract]))`;
@@ -27,7 +44,7 @@ export async function esearch(query: string, date: string, windowDays: number, m
 function parseArticle(xml: string): FetchedPaper | null {
   const pmid = xml.match(/<PMID[^>]*>([\s\S]*?)<\/PMID>/)?.[1]?.trim();
   if (!pmid) return null;
-  const title = xml.match(/<ArticleTitle[^>]*>([\s\S]*?)<\/ArticleTitle>/)?.[1]?.replace(/<[^>]+>/g, '').trim() || '';
+  const title = decodeHtmlEntities(xml.match(/<ArticleTitle[^>]*>([\s\S]*?)<\/ArticleTitle>/)?.[1]?.replace(/<[^>]+>/g, '').trim() || '');
   const authorBlock = xml.match(/<AuthorList[^>]*>([\s\S]*?)<\/AuthorList>/)?.[1] || '';
   const authorRe = /<Author[^>]*>([\s\S]*?)<\/Author>/g;
   const authors: string[] = [];
@@ -35,20 +52,20 @@ function parseArticle(xml: string): FetchedPaper | null {
   while ((m = authorRe.exec(authorBlock))) {
     const inner = m[1];
     const collective = inner.match(/<CollectiveName[^>]*>([\s\S]*?)<\/CollectiveName>/)?.[1];
-    if (collective) { authors.push(collective.replace(/<[^>]+>/g, '').trim()); continue; }
-    const last = inner.match(/<LastName[^>]*>([\s\S]*?)<\/LastName>/)?.[1]?.trim() || '';
-    const fore = inner.match(/<ForeName[^>]*>([\s\S]*?)<\/ForeName>/)?.[1]?.trim() || '';
+    if (collective) { authors.push(decodeHtmlEntities(collective.replace(/<[^>]+>/g, '').trim())); continue; }
+    const last = decodeHtmlEntities(inner.match(/<LastName[^>]*>([\s\S]*?)<\/LastName>/)?.[1]?.trim() || '');
+    const fore = decodeHtmlEntities(inner.match(/<ForeName[^>]*>([\s\S]*?)<\/ForeName>/)?.[1]?.trim() || '');
     const full = `${fore} ${last}`.trim();
     if (full) authors.push(full);
   }
-  const journal = xml.match(/<Journal>[\s\S]*?<Title[^>]*>([\s\S]*?)<\/Title>/)?.[1]?.trim() || '';
+  const journal = decodeHtmlEntities(xml.match(/<Journal>[\s\S]*?<Title[^>]*>([\s\S]*?)<\/Title>/)?.[1]?.trim() || '');
   const abstractMatch = xml.match(/<Abstract[^>]*>([\s\S]*?)<\/Abstract>/);
   let abstract = '';
   if (abstractMatch) {
     const parts: string[] = [];
     const txtRe = /<AbstractText(?:\s+Label="([^"]*)")?[^>]*>([\s\S]*?)<\/AbstractText>/g;
     let mm: RegExpExecArray | null;
-    while ((mm = txtRe.exec(abstractMatch[1]))) { const label = mm[1]; const text = mm[2].replace(/<[^>]+>/g, '').trim(); parts.push(label ? `${label}: ${text}` : text); }
+    while ((mm = txtRe.exec(abstractMatch[1]))) { const label = mm[1]; const text = decodeHtmlEntities(mm[2].replace(/<[^>]+>/g, '').trim()); parts.push(label ? `${label}: ${text}` : text); }
     abstract = parts.join('\n\n');
   }
   const pubXml = xml.match(/<PubDate[^>]*>([\s\S]*?)<\/PubDate>/)?.[1] || '';

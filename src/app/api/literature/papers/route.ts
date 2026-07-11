@@ -73,6 +73,20 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // Online IF fallback: for papers still without IF, fetch from Crossref API.
+    const needsOnlineIf = articles.filter((a: any) => paperIfMap[a.pubmedId] === undefined && a.journal);
+    if (needsOnlineIf.length > 0 && needsOnlineIf.length <= 20) {
+      const { fetchJournalIFs } = await import('@/lib/journal-if-api');
+      const uniqueJournals = [...new Set(needsOnlineIf.map((a: any) => a.journal).filter(Boolean))];
+      const onlineIfMap = await fetchJournalIFs(uniqueJournals);
+      for (const a of needsOnlineIf) {
+        const ifVal = onlineIfMap.get(a.journal);
+        if (ifVal != null) {
+          paperIfMap[a.pubmedId] = ifVal;
+        }
+      }
+    }
+
     const papers = articles.map((a: any) => ({
       pmid: a.pubmedId,
       title: decodeJsonEscapes(a.title) || '',
