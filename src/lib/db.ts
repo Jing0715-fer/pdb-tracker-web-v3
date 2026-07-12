@@ -74,28 +74,34 @@ export function isActiveDbTest(): boolean {
   return active === testAbs
 }
 
-function createClient(): PrismaClient {
-  return new PrismaClient({
-    datasources: { db: { url: resolveDbUrl() } },
-    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
-  })
-}
-
 /**
  * Lazily create / fetch the current PrismaClient.
  *
- * We intentionally DON'T cache the client in a module-level `const` because
- * the user can swap the database path at runtime via `/api/db-config`. After
- * a swap, `recreatePrismaClient()` clears `globalForPrisma.prisma` and the
- * next access transparently builds a fresh client bound to the new URL.
+ * On every access we call `resolveDbUrl()` and compare it with the URL the
+ * cached client was created with. If the config file was updated (e.g. by
+ * the setup wizard or the Run Center), we transparently disconnect the old
+ * client and build a fresh one bound to the new path — no explicit
+ * `recreatePrismaClient()` call needed.
  *
- * To keep `import { db }` ergonomic across the 3 run modules and 500+ other
- * call-sites, we expose `db` as a Proxy that always reflects the *current*
- * client — so callers don't need to know about the recreation mechanism.
+ * This is the key invariant that keeps the `db` Proxy, the Run Center's
+ * status display, and all 3 skill modules (literature / eval / weekly)
+ * reading/writing the SAME database at all times.
  */
+let _cachedDbUrl: string | null = null
+
 function getOrCreateClient(): PrismaClient {
+  const resolvedUrl = resolveDbUrl()
+  // Config changed since last access → rebuild the client.
+  if (globalForPrisma.prisma && _cachedDbUrl !== resolvedUrl) {
+    globalForPrisma.prisma.$disconnect().catch(() => {})
+    globalForPrisma.prisma = undefined
+  }
   if (!globalForPrisma.prisma) {
-    globalForPrisma.prisma = createClient()
+    _cachedDbUrl = resolvedUrl
+    globalForPrisma.prisma = new PrismaClient({
+      datasources: { db: { url: resolvedUrl } },
+      log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
+    })
   }
   return globalForPrisma.prisma
 }

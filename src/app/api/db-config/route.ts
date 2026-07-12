@@ -93,7 +93,7 @@ async function initSchema(dbUrl: string): Promise<{ ok: boolean; stdout: string;
   const env = { ...process.env, DATABASE_URL: dbUrl }
   try {
     const { stdout, stderr } = await execAsync('bunx prisma db push --skip-generate --accept-data-loss', {
-      env,
+      env: { ...env, NODE_OPTIONS: '--max-old-space-size=4096' },
       cwd: process.cwd(),
       maxBuffer: 10 * 1024 * 1024,
       timeout: 60_000,
