@@ -262,8 +262,8 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && allowSkip && onClose) onClose() }}>
-      <DialogContent className="max-w-2xl w-[92vw] !max-w-2xl p-0 overflow-hidden gap-0">
-        <DialogHeader className="px-6 pt-6 pb-4 border-b border-border/50">
+      <DialogContent className="max-w-2xl w-[92vw] !max-w-2xl p-0 overflow-hidden gap-0" style={{ marginTop: "2rem" }}>
+        <DialogHeader className="px-6 pt-8 pb-4 border-b border-border/50">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Database className="h-4 w-4 text-amber-500" />
             数据库初始化设置
