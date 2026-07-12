@@ -81,7 +81,12 @@ import {
   FileDown,
   Download,
   Clock,
+  HardDrive,
+  FilePlus2,
+  FolderOpen,
 } from 'lucide-react';
+import { toast } from 'sonner';
+import { DbSetupWizard } from '@/components/db-setup-wizard';
 
 /* ──────────────────────────────────────────────────────────────────────── */
 /*  Types                                                                    */
@@ -967,14 +972,30 @@ export function SettingsRunPanel() {
   }, [evalMaxBlastHits]);
   // Database path config
   const [dbPath, setDbPath] = useState('file:./db/custom.db');
+  /** Full DB status object from `/api/db-config` GET — surfaces active
+   *  path, schema status, row counts, and isTest flag so the Run Center and
+   *  the wizard can stay in lock-step with whatever the 3 modules are
+   *  actually reading/writing. */
+  const [dbStatus, setDbStatus] = useState<DbStatus | null>(null);
   const [dbPathSaving, setDbPathSaving] = useState(false);
   const [dbPathStatus, setDbPathStatus] = useState<string | null>(null);
+  const [dbWizardOpen, setDbWizardOpen] = useState(false);
 
   const loadDbPath = useCallback(async () => {
     try {
       const res = await fetch('/api/db-config');
-      const data = await res.json();
-      if (data.dbPath) setDbPath(data.dbPath);
+      // Guard against HTML error pages (502 from gateway when server crashes)
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        setDbPathStatus('✗ 服务器无响应，请重试');
+        return;
+      }
+      const data = await res.json() as DbStatus;
+      setDbStatus(data);
+      // Always sync the input field to the ACTIVE path (single source of truth).
+      // This keeps the Run Center display in lock-step with the setup wizard:
+      // whichever path the wizard just confirmed is what we show here.
+      setDbPath(data.configuredDbPath || data.activeUrl || 'file:./db/custom.db');
       setDbPathStatus('✓ 已加载');
     } catch {
       setDbPathStatus('✗ 加载失败');
@@ -988,11 +1009,23 @@ export function SettingsRunPanel() {
       const res = await fetch('/api/db-config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ dbPath }),
+        body: JSON.stringify({ dbPath, create: false, initSchema: true, confirmed: true }),
       });
+      // Guard against HTML error pages (502 when server crashes during prisma db push)
+      const ct = res.headers.get('content-type') || '';
+      if (!ct.includes('application/json')) {
+        setDbPathStatus('✗ 服务器在初始化时无响应，请重试');
+        setDbPathSaving(false);
+        return;
+      }
       const data = await res.json();
       if (data.ok) {
-        setDbPathStatus('✓ 已保存，重启服务器后生效');
+        setDbPathStatus('✓ 已切换并即时生效（无需重启）');
+        // Refresh status so the UI reflects the new active path + counts.
+        await loadDbPath();
+        // Notify parent (pdb-tracker) so it re-fetches all data from the
+        // newly-active database — keeps the dashboard in sync.
+        onDbChanged?.();
       } else {
         setDbPathStatus(`✗ ${data.error || '保存失败'}`);
       }
@@ -1001,10 +1034,10 @@ export function SettingsRunPanel() {
     } finally {
       setDbPathSaving(false);
     }
-  }, [dbPath]);
+  }, [dbPath, loadDbPath, onDbChanged]);
 
   // Load DB path on mount
-  useEffect(() => { loadDbPath(); }, []);
+  useEffect(() => { loadDbPath(); }, [loadDbPath]);
   const [evalGenerateReport, setEvalGenerateReport] = useState(true);
   const [evalSaveReportFile, setEvalSaveReportFile] = useState(true);
 
@@ -1524,11 +1557,60 @@ export function SettingsRunPanel() {
               <div className="flex items-center gap-1.5">
                 <Database className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-sm font-medium text-foreground">数据库</span>
+                {dbStatus?.isTest ? (
+                  <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-amber-500/40 text-amber-600 bg-amber-500/10 gap-0.5 ml-1">
+                    <AlertTriangle className="h-2.5 w-2.5" /> 测试库
+                  </Badge>
+                ) : dbStatus?.confirmed ? (
+                  <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 bg-emerald-500/10 gap-0.5 ml-1">
+                    <ShieldCheck className="h-2.5 w-2.5" /> 已确认
+                  </Badge>
+                ) : null}
               </div>
-              <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-amber-500/30 text-amber-600 bg-amber-500/10 gap-0.5">
-                <RefreshCw className="h-2 w-2" /> 重启生效
+              <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 gap-0.5">
+                <Zap className="h-2.5 w-2.5" /> 即时生效
               </Badge>
             </div>
+
+            {/* Active path read-only display — this is what the 3 modules actually read/write */}
+            {dbStatus && (
+              <div className="mb-2 rounded-md bg-muted/40 border border-border/40 px-2.5 py-1.5">
+                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
+                  <HardDrive className="h-2.5 w-2.5" />
+                  <span>当前活动路径（三大模块与运行中心共用）</span>
+                </div>
+                <div className="text-[11px] font-mono text-foreground break-all">
+                  {dbStatus.activeFsPath}
+                </div>
+                <div className="flex flex-wrap gap-1 mt-1.5">
+                  {dbStatus.hasSchema ? (
+                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 gap-0.5">
+                      <CheckCircle2 className="h-2.5 w-2.5" /> 表结构 {dbStatus.tableCount}
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-rose-500/30 text-rose-600 bg-rose-500/10 gap-0.5">
+                      <XCircle className="h-2.5 w-2.5" /> 未初始化
+                    </Badge>
+                  )}
+                  {dbStatus.hasSchema && (dbStatus.counts?.PdbStructure || 0) > 0 && (
+                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 gap-0.5">
+                      PDB {dbStatus.counts?.PdbStructure}
+                    </Badge>
+                  )}
+                  {dbStatus.hasSchema && (dbStatus.counts?.Evaluation || 0) > 0 && (
+                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 gap-0.5">
+                      评估 {dbStatus.counts?.Evaluation}
+                    </Badge>
+                  )}
+                  {dbStatus.hasSchema && (dbStatus.counts?.PubMedArticle || 0) > 0 && (
+                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 gap-0.5">
+                      论文 {dbStatus.counts?.PubMedArticle}
+                    </Badge>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center gap-2">
               <Input
                 value={dbPath}
@@ -1544,23 +1626,65 @@ export function SettingsRunPanel() {
                 disabled={dbPathSaving}
               >
                 {dbPathSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                <span className="ml-1">保存</span>
+                <span className="ml-1">切换</span>
               </Button>
               <Button
                 variant="ghost"
                 size="sm"
                 className="h-8 text-xs shrink-0"
                 onClick={loadDbPath}
+                title="刷新状态"
               >
                 <RefreshCw className="h-3 w-3" />
               </Button>
             </div>
+
+            <div className="flex gap-1.5 mt-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] flex-1 border-emerald-500/30 text-emerald-700 hover:bg-emerald-500/10"
+                onClick={() => setDbWizardOpen(true)}
+              >
+                <FilePlus2 className="h-3 w-3 mr-1" /> 新建数据库
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-[11px] flex-1 border-sky-500/30 text-sky-700 hover:bg-sky-500/10"
+                onClick={() => setDbWizardOpen(true)}
+              >
+                <FolderOpen className="h-3 w-3 mr-1" /> 选择已有
+              </Button>
+            </div>
+
             {dbPathStatus && (
               <div className={`mt-1 text-xs ${dbPathStatus.startsWith('✓') ? 'text-emerald-600' : 'text-rose-500'}`}>
                 {dbPathStatus}
               </div>
             )}
+
+            {dbStatus?.isTest && (
+              <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-[10px] text-amber-700 dark:text-amber-300 leading-relaxed">
+                <AlertTriangle className="h-2.5 w-2.5 inline mr-1" />
+                当前使用的是测试数据库（<code className="font-mono">db/custom.db</code>），仅用于功能验证。建议点击「新建数据库」创建正式数据库以保存您的工作数据。
+              </div>
+            )}
           </div>
+
+          {/* DB setup wizard (shared with first-run flow) */}
+          <DbSetupWizard
+            open={dbWizardOpen}
+            allowSkip
+            onClose={() => setDbWizardOpen(false)}
+            onComplete={() => {
+              setDbWizardOpen(false);
+              loadDbPath();
+              // ★ Notify parent so dashboard data refreshes from the new DB.
+              onDbChanged?.();
+              toast.success('数据库已就绪，运行中心与三大模块已同步');
+            }}
+          />
         </div>
 
         {/* ── Tabbed module panels ─────────────────────────────────────── */}

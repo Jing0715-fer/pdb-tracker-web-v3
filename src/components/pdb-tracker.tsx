@@ -124,6 +124,11 @@ const SettingsRunPanel = dynamic(() => import('@/components/settings-run-panel')
   loading: () => <div className="animate-pulse bg-claude-border-light rounded h-8 w-full" />,
 });
 
+const DbSetupWizard = dynamic(() => import('@/components/db-setup-wizard').then(m => ({ default: m.DbSetupWizard })), {
+  ssr: false,
+  loading: () => null,
+});
+
 const LiteratureRelatedPapers = dynamic(() => import('@/components/literature/LiteratureRelatedPapers').then(m => ({ default: m.LiteratureRelatedPapers })), {
   ssr: false,
   loading: () => <div className="animate-pulse bg-claude-border-light rounded h-8 w-full" />,
@@ -365,6 +370,16 @@ interface AiAnalysisResult {
 export default function PdbTracker() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+
+  // ── First-run DB setup wizard ───────────────────────────────────────────
+  // On mount, fetch /api/db-config to check whether the user has confirmed a
+  // non-test database. If they haven't, pop the setup wizard so they pick or
+  // create one. The wizard writes to .hermes/db-config.json + recreates the
+  // PrismaClient, so all 3 modules (literature / eval / weekly) and the Run
+  // Center immediately read/write the same DB.
+  const [dbWizardOpen, setDbWizardOpen] = useState(false);
+  const [dbWizardAllowSkip, setDbWizardAllowSkip] = useState(true);
+  const [dbWizardChecked, setDbWizardChecked] = useState(false);
 
   // Mode state
   const [mode, setMode] = useState<Mode>('weekly');
@@ -963,6 +978,34 @@ export default function PdbTracker() {
   // ─── Effects ──────────────────────────────────────────────────────────────
 
   useEffect(() => { setMounted(true); }, []);
+
+  // ── First-run DB check ────────────────────────────────────────────────
+  // Pop the setup wizard on first load when the user hasn't confirmed a
+  // database yet (first time) OR the schema isn't initialized. The wizard
+  // lets the user create a new DB or pick an existing one; once confirmed
+  // it won't show again. The test-DB warning is surfaced separately in the
+  // Run Center panel (settings-run-panel.tsx).
+  useEffect(() => {
+    if (dbWizardChecked) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/db-config');
+        const data = await res.json();
+        if (cancelled) return;
+        const needsSetup = !data.confirmed || !data.hasSchema;
+        if (needsSetup) {
+          setDbWizardAllowSkip(true); // allow skip so the app is still usable
+          setDbWizardOpen(true);
+        }
+      } catch {
+        /* network error — don't block the app */
+      } finally {
+        if (!cancelled) setDbWizardChecked(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [dbWizardChecked]);
 
   // Apply saved settings on first load
   useEffect(() => {
@@ -3805,7 +3848,7 @@ export default function PdbTracker() {
           <NotificationBell />
 
           {/* Skills & Manual Run Panel (literature-daily / protein-target-evaluator) */}
-          <SettingsRunPanel />
+          <SettingsRunPanel onDbChanged={handleRetryAll} />
 
           {/* Settings Button */}
           <Tooltip>
@@ -4294,6 +4337,24 @@ export default function PdbTracker() {
           onClose={() => setWeeklyDiffOpen(false)}
         />
       )}
+
+      {/* First-run DB setup wizard — ensures Run Center + 3 modules share one DB */}
+      <DbSetupWizard
+        open={dbWizardOpen}
+        allowSkip={dbWizardAllowSkip}
+        onClose={() => setDbWizardOpen(false)}
+        onComplete={() => {
+          setDbWizardOpen(false);
+          // Re-fetch all data so the UI reflects the newly-active DB.
+          (async () => {
+            await fetchSnapshots();
+            await fetchEntries();
+            fetchedModesRef.current.delete('evaluation');
+            fetchedModesRef.current.delete('literature');
+            toast.success('数据库已就绪，运行中心与三大模块已同步');
+          })();
+        }}
+      />
     </div>
     </TooltipProvider>
   );

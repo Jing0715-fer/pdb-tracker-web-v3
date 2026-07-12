@@ -6,35 +6,38 @@ const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
+/**
+ * The default / "test" database path bundled with the project.
+ *
+ * This file is shipped only for smoke-testing the schema — it must NOT be
+ * used to store real user data. The first-run wizard will prompt the user
+ * to either create a new database file or select an existing one, and the
+ * chosen path is persisted to `.hermes/db-config.json`.
+ */
+export const DEFAULT_TEST_DB_PATH = 'file:./db/custom.db'
 
 /**
- * Resolve the database URL on EVERY instantiation so that:
- *   - the path in .env is computed against the project root (not the API route's CWD, which
- *     Prisma would otherwise mis-resolve `file:./db/custom.db` for);
- *   - users can override it at runtime via the UI (writes to .hermes/db-config.json);
- *   - on a fresh machine checkout with NO .env present, we still find the bundled
- *     ./db/custom.db file because we anchor the path to project root.
+ * Resolve the database URL using the SAME resolution order as `PrismaClient`
+ * instantiation. This is the single source of truth for "what database is
+ * the app actually talking to right now".
+ *
+ *   1. `.hermes/db-config.json` written by the UI (`/api/db-config`)
+ *   2. `DATABASE_URL` from `.env`
+ *   3. The bundled test database `file:./db/custom.db`
+ *
+ * Relative paths are always anchored to `process.cwd()` (the project root),
+ * never to the CWD of an individual API route.
  */
-function resolveDbUrl(): string {
+export function resolveDbUrl(): string {
   // 1. Try the config file written by the UI (/api/db-config).
-  //    We need a synchronous read here because PrismaClient constructors
-  //    do not accept async callbacks; for dynamic paths we'd have to
-  //    reload the client. So we resolve synchronously via a small cache.
   try {
-    
-    
-    const cfgPath = resolve(process.cwd(), '.hermes', 'db-config.json');
+    const cfgPath = resolve(process.cwd(), '.hermes', 'db-config.json')
     if (existsSync(cfgPath)) {
       try {
-        const raw = readFileSync(cfgPath, 'utf-8');
-        const cfg = JSON.parse(raw);
+        const raw = readFileSync(cfgPath, 'utf-8')
+        const cfg = JSON.parse(raw)
         if (cfg && typeof cfg.dbPath === 'string' && cfg.dbPath.length > 0) {
-          const trimmed = cfg.dbPath.replace(/^file:/, '');
-          // Convert relative paths to absolute (anchored at project root)
-          if (!isAbsolute(trimmed)) {
-            return `file:${resolve(process.cwd(), trimmed)}`;
-          }
-          return `file:${trimmed}`;
+          return normalizeDbUrl(cfg.dbPath)
         }
       } catch {
         /* malformed config — fall through to env */
@@ -45,31 +48,106 @@ function resolveDbUrl(): string {
   }
 
   // 2. Fall back to DATABASE_URL from .env (relative paths anchored to project root).
-  const envUrl = process.env.DATABASE_URL || 'file:./db/custom.db';
-  const rel = envUrl.replace(/^file:/, '');
-  if (!rel) return envUrl;
-  try {
-    
-    if (!isAbsolute(rel)) return `file:${resolve(process.cwd(), rel)}`;
-    return envUrl;
-  } catch {
-    return envUrl;
-  }
+  const envUrl = process.env.DATABASE_URL || DEFAULT_TEST_DB_PATH
+  return normalizeDbUrl(envUrl)
 }
 
-export const db =
-  globalForPrisma.prisma ??
-  new PrismaClient({
+/** Convert a user-provided dbPath into a normalized `file:` URL. */
+export function normalizeDbUrl(raw: string): string {
+  const trimmed = (raw || '').replace(/^file:/, '').trim()
+  if (!trimmed) return DEFAULT_TEST_DB_PATH
+  if (!isAbsolute(trimmed)) {
+    return `file:${resolve(process.cwd(), trimmed)}`
+  }
+  return `file:${trimmed}`
+}
+
+/** Return the absolute filesystem path (no `file:` prefix) of the active DB. */
+export function getActiveDbFsPath(): string {
+  return resolveDbUrl().replace(/^file:/, '')
+}
+
+/** Return true when the currently-resolved DB is the bundled test database. */
+export function isActiveDbTest(): boolean {
+  const active = getActiveDbFsPath()
+  const testAbs = resolve(process.cwd(), 'db', 'custom.db')
+  return active === testAbs
+}
+
+function createClient(): PrismaClient {
+  return new PrismaClient({
     datasources: { db: { url: resolveDbUrl() } },
     log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   })
+}
 
-if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+/**
+ * Lazily create / fetch the current PrismaClient.
+ *
+ * We intentionally DON'T cache the client in a module-level `const` because
+ * the user can swap the database path at runtime via `/api/db-config`. After
+ * a swap, `recreatePrismaClient()` clears `globalForPrisma.prisma` and the
+ * next access transparently builds a fresh client bound to the new URL.
+ *
+ * To keep `import { db }` ergonomic across the 3 run modules and 500+ other
+ * call-sites, we expose `db` as a Proxy that always reflects the *current*
+ * client — so callers don't need to know about the recreation mechanism.
+ */
+function getOrCreateClient(): PrismaClient {
+  if (!globalForPrisma.prisma) {
+    globalForPrisma.prisma = createClient()
+  }
+  return globalForPrisma.prisma
+}
 
-/** Test/clear helper — used by API routes that want to re-read the config file. */
+/**
+ * Drop the cached PrismaClient (and disconnect it) so that the next access
+ * rebuilds a client bound to whatever path is currently in
+ * `.hermes/db-config.json`.
+ *
+ * Called by `/api/db-config` POST after writing a new config.
+ */
+export async function recreatePrismaClient(): Promise<void> {
+  const old = globalForPrisma.prisma
+  globalForPrisma.prisma = undefined
+  if (old) {
+    try {
+      await old.$disconnect()
+    } catch {
+      /* ignore — we're throwing it away anyway */
+    }
+  }
+}
+
+/** Test/clear helper — used by API routes that want to force re-read. */
 export function _resetDbForTest(): void {
   if (globalForPrisma.prisma) {
-    globalForPrisma.prisma.$disconnect()
+    globalForPrisma.prisma.$disconnect().catch(() => {})
   }
   globalForPrisma.prisma = undefined
+}
+
+/**
+ * Proxy-backed `db` export.
+ *
+ * Every property access is forwarded to the *current* underlying
+ * `PrismaClient` instance. Methods are bound to the underlying client so
+ * `this` is correct. This lets all 3 skill modules (literature / eval /
+ * weekly) read & write through the same active database without anyone
+ * holding a stale reference after the user switches DB.
+ */
+export const db = new Proxy({} as PrismaClient, {
+  get(_target, prop, receiver) {
+    const client = getOrCreateClient()
+    const value = Reflect.get(client, prop, receiver)
+    if (typeof value === 'function') {
+      return value.bind(client)
+    }
+    return value
+  },
+}) as PrismaClient
+
+if (process.env.NODE_ENV !== 'production') {
+  // Ensure the client exists on first import in dev so errors surface early.
+  getOrCreateClient()
 }
