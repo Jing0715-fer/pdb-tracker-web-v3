@@ -20,6 +20,7 @@
  */
 
 import { spawn, execSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -359,6 +360,31 @@ const CLI_ADAPTERS: CliAdapter[] = [
     callTimeoutMs: 240_000,
   },
   {
+    id: 'codebuddy',
+    label: 'Codebuddy / WorkBuddy CLI',
+    icon: '🐼',
+    bin: 'codebuddy',
+    needsNode: true,
+    /** Hard-coded fallback for WorkBuddy's bundled CLI:
+     *  `C:\Program Files\WorkBuddy\resources\app.asar.unpacked\cli\bin\codebuddy`.
+     *  PATH rarely has it; we try this absolute location first. Env override:
+     *  `CODEBUDDY_CLI_PATH=...`. */
+    extraProbePaths: [
+      process.platform === 'win32'
+        ? 'C:\\Program Files\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\bin\\codebuddy'
+        : '/usr/local/bin/codebuddy',
+    ],
+    /** Headless invocation — same flag set used by Claude Code-style CLIs.
+     *  `--print "<prompt>"` emits a single text reply on stdout and exits.
+     *  For streaming, append `--output-format stream-json` (NDJSON events).
+     *  For interactive TUI/REPL, omit `--print`. */
+    callArgs: (q) => ['--print', q],
+    outputStream: 'stdout',
+    probeTimeoutMs: 15_000,
+    callTimeoutMs: 240_000,
+    extraEnv: { PYTHONIOENCODING: 'utf-8' },
+  },
+  {
     id: 'aider',
     label: 'Aider CLI',
     bin: 'aider',
@@ -483,10 +509,31 @@ async function findOnWsl(bin: string): Promise<string | null> {
 
 
 /** Resolve `bin` on PATH. Uses `where` (Windows) / `which` (POSIX). Returns absolute path or null. */
-function findOnPath(bin: string): Promise<string | null> {
-  const cmd = process.platform === 'win32' ? 'where' : 'which';
+function findOnPath(bin: string, extras?: string[]): Promise<string | null> {
   return new Promise<string | null>((resolve) => {
     let resolved = false;
+    // 1. Hard-coded extras (e.g. WorkBuddy's bundled CLI).
+    if (extras) {
+      for (const p of extras) {
+        if (resolved) break;
+        try {
+          if (existsSync(p)) { resolved = true; resolve(p); return; }
+        } catch { /* keep looking */ }
+      }
+    }
+    // 2. ${BIN}_CLI_PATH env override.
+    if (!resolved) {
+      const envKey = bin.toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_CLI_PATH';
+      const envPath = process.env[envKey];
+      if (envPath) {
+        try {
+          if (existsSync(envPath)) { resolved = true; resolve(envPath); return; }
+        } catch { /* keep looking */ }
+      }
+    }
+    // 3. PATH lookup (where / which).
+    if (resolved) return;
+    const cmd = process.platform === 'win32' ? 'where' : 'which';
     const r = spawn(cmd, [bin], { stdio: ['ignore', 'pipe', 'pipe'], shell: false });
     let out = '';
     r.stdout.on('data', (b) => { out += b.toString(); });
@@ -507,7 +554,7 @@ interface ProbeOk  { ok: true; bin: string; reason: string }
 interface ProbeErr { ok: false; reason: string }
 
 async function probeCli(adapter: CliAdapter): Promise<ProbeOk | ProbeErr> {
-  const bin = await findOnPath(adapter.bin);
+  const bin = await findOnPath(adapter.bin, adapter.extraProbePaths);
   if (!bin) return { ok: false, reason: `${adapter.label} not found on PATH` };
 
   // Default to a fast --version probe; skip if not provided.
@@ -515,7 +562,10 @@ async function probeCli(adapter: CliAdapter): Promise<ProbeOk | ProbeErr> {
   const probeTimeout = adapter.probeTimeoutMs ?? 6_000;
 
   return new Promise((resolve) => {
-    const child = spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...adapter.extraEnv } });
+    // WorkBuddy-style shims are Node.js scripts — launch via `node <bin> ...args`
+    const child = adapter.needsNode
+      ? spawn(process.execPath, [bin, ...args], { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...adapter.extraEnv } })
+      : spawn(bin, args, { stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, ...adapter.extraEnv } });
     let stdout = '';
     let stderr = '';
     let done = false;
@@ -892,10 +942,16 @@ function runCli(adapter: CliAdapter, bin: string, prompt: string, model: string 
   const timeoutMs = computeCliTimeoutMs(adapter, prompt);
 
   return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: { ...process.env, ...adapter.extraEnv },
-    });
+    // WorkBuddy-style shims are Node.js scripts — invoke via `node <bin> ...args`.
+    const child = adapter.needsNode
+      ? spawn(process.execPath, [bin, ...args], {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, ...adapter.extraEnv },
+        })
+      : spawn(bin, args, {
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: { ...process.env, ...adapter.extraEnv },
+        });
 
     let stdout = '';
     let stderr = '';
