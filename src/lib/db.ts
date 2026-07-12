@@ -1,49 +1,74 @@
 import { PrismaClient } from '@prisma/client'
-import { promises as fs } from 'node:fs'
-import * as path from 'node:path'
-
-const CONFIG_FILE = path.resolve(process.cwd(), '.hermes', 'db-config.json')
-
-/** Read the persisted database path from config file, falling back to env or default. */
-async function resolveDatabaseUrl(): Promise<string> {
-  try {
-    const raw = await fs.readFile(CONFIG_FILE, 'utf-8')
-    const cfg = JSON.parse(raw)
-    if (cfg.dbPath && typeof cfg.dbPath === 'string') return cfg.dbPath
-  } catch { /* file missing or invalid — use fallback */ }
-  return process.env.DATABASE_URL || 'file:./db/custom.db'
-}
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
 
-/** Lazily initialised PrismaClient — reads db path from .hermes/db-config.json. */
-export async function createDb(): Promise<PrismaClient> {
-  if (globalForPrisma.prisma) return globalForPrisma.prisma
+/**
+ * Resolve the database URL on EVERY instantiation so that:
+ *   - the path in .env is computed against the project root (not the API route's CWD, which
+ *     Prisma would otherwise mis-resolve `file:./db/custom.db` for);
+ *   - users can override it at runtime via the UI (writes to .hermes/db-config.json);
+ *   - on a fresh machine checkout with NO .env present, we still find the bundled
+ *     ./db/custom.db file because we anchor the path to project root.
+ */
+function resolveDbUrl(): string {
+  // 1. Try the config file written by the UI (/api/db-config).
+  //    We need a synchronous read here because PrismaClient constructors
+  //    do not accept async callbacks; for dynamic paths we'd have to
+  //    reload the client. So we resolve synchronously via a small cache.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const fs = require('node:fs') as typeof import('node:fs');
+    const path = require('node:path') as typeof import('node:path');
+    const cfgPath = path.resolve(process.cwd(), '.hermes', 'db-config.json');
+    if (fs.existsSync(cfgPath)) {
+      try {
+        const raw = fs.readFileSync(cfgPath, 'utf-8');
+        const cfg = JSON.parse(raw);
+        if (cfg && typeof cfg.dbPath === 'string' && cfg.dbPath.length > 0) {
+          const trimmed = cfg.dbPath.replace(/^file:/, '');
+          // Convert relative paths to absolute (anchored at project root)
+          if (!path.isAbsolute(trimmed)) {
+            return `file:${path.resolve(process.cwd(), trimmed)}`;
+          }
+          return `file:${trimmed}`;
+        }
+      } catch {
+        /* malformed config — fall through to env */
+      }
+    }
+  } catch {
+    /* fs unavailable — fall through to env */
+  }
 
-  const url = await resolveDatabaseUrl()
-  // Override env so Prisma picks it up
-  process.env.DATABASE_URL = url
-
-  const client = new PrismaClient({
-    datasources: { db: { url } },
-    log: process.env.NODE_ENV === 'development' ? ['query'] : [],
-  })
-
-  globalForPrisma.prisma = client
-  return client
+  // 2. Fall back to DATABASE_URL from .env (relative paths anchored to project root).
+  const envUrl = process.env.DATABASE_URL || 'file:./db/custom.db';
+  const rel = envUrl.replace(/^file:/, '');
+  if (!rel) return envUrl;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const path = require('node:path') as typeof import('node:path');
+    if (!path.isAbsolute(rel)) return `file:${path.resolve(process.cwd(), rel)}`;
+    return envUrl;
+  } catch {
+    return envUrl;
+  }
 }
 
-/** Synchronous export for existing callers that use `db` at module scope.
- *  IMPORTANT: At module-load time the config file may not be readable yet,
- *  so we create a client with the env default. Call `await createDb()` early
- *  in your route handler to re-initialise with the correct path. */
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
-    datasources: { db: { url: process.env.DATABASE_URL || 'file:./db/custom.db' } },
-    log: process.env.NODE_ENV === 'development' ? ['query'] : [],
+    datasources: { db: { url: resolveDbUrl() } },
+    log: process.env.NODE_ENV === 'development' ? ['error', 'warn'] : ['error'],
   })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+
+/** Test/clear helper — used by API routes that want to re-read the config file. */
+export function _resetDbForTest(): void {
+  if (globalForPrisma.prisma) {
+    globalForPrisma.prisma.$disconnect()
+  }
+  globalForPrisma.prisma = undefined
+}
