@@ -929,7 +929,9 @@ function CycleTimeline({
   );
 }
 
-export function SettingsRunPanel() {
+export function SettingsRunPanel({
+  onDbChanged,
+}: { onDbChanged?: () => void } = {}) {
   const [open, setOpen] = useState(false);
   const [activeTab, setActiveTab] = useState('literature');
   const [llmInfo, setLlmInfo] = useState<LlmInfo | null>(null);
