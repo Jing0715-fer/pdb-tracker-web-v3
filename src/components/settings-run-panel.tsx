@@ -62,6 +62,8 @@ import {
   RefreshCw,
   CalendarClock,
   ChevronDown,
+  ChevronRight,
+  History,
   Activity,
   Cpu,
   Database,
@@ -92,7 +94,17 @@ interface LlmInfo {
     model?: string;
   };
   chosen: string;
-  available: Array<{ provider: string; bin?: string; reason: string; label?: string }>;
+  available: Array<{
+    provider: string;
+    bin?: string | null;
+    icon: string;
+  /** When set, render <img /> instead of emoji. */
+  iconUrl?: string | null;
+    label: string;
+    reason: string;
+    available: boolean;
+    via: 'native' | 'wsl' | 'sdk';
+  }>;
   totalClisScanned: number;
 }
 
@@ -489,7 +501,7 @@ function LLMPreview({
                       {error || '未知错误'}
                     </div>
                     <div className="text-[10px] text-muted-foreground/70 mt-2">
-                      本次运行未生成报告文本（已跳过 fallback，不伪造内容）。请检查 z-ai SDK 配置 / 网络 / 配额后重试。
+                      本次运行未生成报告文本（已跳过 fallback，不伪造内容）。请检查 hermes / claude / codex CLI 是否在 PATH 上，或设置 ANTHROPIC_API_KEY / OPENAI_API_KEY 后重试。
                     </div>
                   </div>
                 </div>
@@ -502,6 +514,305 @@ function LLMPreview({
           </motion.div>
         )}
       </AnimatePresence>
+    </motion.div>
+  );
+}
+
+
+
+/**
+ * RunHistoryPanel — a slim strip at the top of each module showing the most
+ * recent N runs for that module. Loads from `/api/skill-runs/history` with a
+ * client-side refresh trigger when a fresh run completes. Compact rows; click
+ * a row to expand its `details` JSON.
+ */
+function RunHistoryPanel({
+  moduleKey,
+  refreshKey,
+  limit = 5,
+}: {
+  moduleKey: 'literature' | 'eval' | 'weekly';
+  refreshKey: number;
+  limit?: number;
+}) {
+  const [rows, setRows] = useState<Array<{
+    id: string;
+    module: string;
+    status: string;
+    summary: string;
+    provider?: string | null;
+    model?: string | null;
+    llmOk?: boolean | null;
+    llmFallback?: boolean | null;
+    llmError?: string | null;
+    durationMs?: number | null;
+    createdAt: string;
+  }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    fetch(`/api/skill-runs/history?module=${moduleKey}&limit=${limit}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        setRows(Array.isArray(d?.runs) ? d.runs : []);
+      })
+      .catch(() => { if (!cancelled) setRows([]); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [moduleKey, limit, refreshKey]);
+
+  if (loading) {
+    return (
+      <div className="px-3 py-2 flex items-center gap-2 text-[10px] text-muted-foreground/60 border-t border-border/40 bg-background/30">
+        <Loader2 className="h-3 w-3 animate-spin" />
+        加载运行历史…
+      </div>
+    );
+  }
+  if (rows.length === 0) return null;
+
+  const fmtDur = (ms?: number | null) => {
+    if (!ms || ms <= 0) return '—';
+    if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+    return `${Math.floor(ms / 60_000)}m${Math.floor((ms % 60_000) / 1000)}s`;
+  };
+  const fmtTime = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleString('zh-CN', {
+        month: 'numeric', day: 'numeric',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+      });
+    } catch { return iso; }
+  };
+
+  return (
+    <div className="px-3 py-2 border-t border-border/40 bg-background/30">
+      <div className="flex items-center gap-2 mb-1.5">
+        <History className="h-3 w-3 text-muted-foreground/70" />
+        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+          最近 {rows.length} 次运行
+        </span>
+      </div>
+      <div className="space-y-0.5">
+        {rows.map((r) => {
+          const isOk = r.status === 'success';
+          const isErr = r.status === 'error';
+          const isOpen = expandedId === r.id;
+          return (
+            <div key={r.id} className="border border-border/40 rounded-md bg-background/40 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => setExpandedId(isOpen ? null : r.id)}
+                className="w-full px-2 py-1 flex items-center gap-2 text-left hover:bg-background/60 transition-colors"
+              >
+                {isOk ? (
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                ) : isErr ? (
+                  <XCircle className="h-3 w-3 text-rose-500 shrink-0" />
+                ) : (
+                  <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
+                )}
+                <span className="text-[10px] font-mono text-muted-foreground shrink-0">{fmtTime(r.createdAt)}</span>
+                <span className="text-[11px] truncate flex-1" title={r.summary}>{r.summary}</span>
+                {r.provider && (
+                  <span className="text-[9px] font-mono text-muted-foreground/70 shrink-0 hidden sm:inline truncate max-w-[100px]" title={`${r.provider}/${r.model}`}>
+                    {r.provider}/{r.model}
+                  </span>
+                )}
+                <span className="text-[9px] text-muted-foreground/60 font-mono shrink-0">{fmtDur(r.durationMs)}</span>
+                <ChevronRight className={`h-3 w-3 text-muted-foreground/60 transition-transform shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
+              </button>
+              <AnimatePresence initial={false}>
+                {isOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: 'auto', opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.15 }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-2 pb-2 pt-1 space-y-1 border-t border-border/30">
+                      {r.llmError && (
+                        <div className="rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1 text-[10px] font-mono text-rose-600 dark:text-rose-300 break-all">
+                          {r.llmError}
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-1 text-[10px]">
+                        <div className="text-muted-foreground/70">status: <span className="font-mono">{r.status}</span></div>
+                        <div className="text-muted-foreground/70">provider: <span className="font-mono">{r.provider || '—'}</span></div>
+                        <div className="text-muted-foreground/70">model: <span className="font-mono">{r.model || '—'}</span></div>
+                        <div className="text-muted-foreground/70">llmOk: <span className="font-mono">{r.llmOk === true ? '✓' : r.llmOk === false ? '✗' : '—'}</span></div>
+                      </div>
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * ChapterStream — per-chapter collapsible viewer for SSE `chapter_done`
+ * events emitted by /api/evaluations/run. Each finished chapter becomes a
+ * `<details>` row showing its Markdown content; chapters in flight show a
+ * skeleton with the current `chapter_start` message.
+ */
+function ChapterStream({
+  events,
+  running,
+  done,
+}: {
+  events: StreamEvent[];
+  running: boolean;
+  done: boolean;
+}) {
+  // Pull ordered chapters from the event stream.
+  // Two flavors:
+  //   chapter_done    — finalised, has chapterContent (real Markdown)
+  //   chapter (only)  — started but no chapter_done yet → show 'in flight'
+  // We dedupe by chapter key, prefer the latest version.
+  type ChapterRow = {
+    key: string;
+    label: string;
+    index: number;
+    total: number;
+    status: 'running' | 'success' | 'error';
+    content?: string;
+    error?: string;
+    durationMs?: number;
+    startedAt?: string;
+    finishedAt?: string;
+  };
+  const labels: Record<string, string> = {
+    summary: '执行摘要',
+    function: '蛋白功能与生物学背景',
+    topology: '序列与拓扑结构',
+    pdb_analysis: '现有 PDB 结构分析',
+    feasibility: '结构解析可行性评估',
+    experimental: '实验方案',
+    references: '重要参考文献',
+    conclusion: '总结',
+  };
+
+  const byKey = new Map<string, ChapterRow>();
+  for (const e of events) {
+    if (e.stage === 'chapter' && e.chapter) {
+      const k = e.chapter as string;
+      const cur = byKey.get(k) || { key: k, label: labels[k] || k, index: 0, total: 0, status: 'running' };
+      cur.status = 'running';
+      cur.index = (e.chapterIndex as number) ?? cur.index;
+      cur.total = (e.chapterTotal as number) ?? cur.total;
+      cur.startedAt = e.ts;
+      byKey.set(k, cur);
+    } else if (e.stage === 'chapter_done' && e.chapter) {
+      const k = e.chapter as string;
+      const isSuccess = e.level === 'success';
+      const cur = byKey.get(k) || { key: k, label: labels[k] || k, index: 0, total: 0, status: 'running' };
+      cur.status = isSuccess ? 'success' : 'error';
+      cur.index = (e.chapterIndex as number) ?? cur.index;
+      cur.total = (e.chapterTotal as number) ?? cur.total;
+      cur.content = (e.chapterContent as string) ?? cur.content;
+      cur.error = (e.chapterError as string) ?? cur.error;
+      cur.durationMs = (e.chapterDurationMs as number) ?? cur.durationMs;
+      cur.finishedAt = e.ts;
+      byKey.set(k, cur);
+    }
+  }
+  const rows = Array.from(byKey.values()).sort((a, b) => (a.index || 0) - (b.index || 0));
+  if (rows.length === 0) return null;
+
+  const completedCount = rows.filter((r) => r.status !== 'running').length;
+  const okCount = rows.filter((r) => r.status === 'success').length;
+  const failCount = rows.filter((r) => r.status === 'error').length;
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mt-3 rounded-lg border border-violet-500/30 bg-gradient-to-br from-violet-500/5 via-transparent to-transparent overflow-hidden"
+    >
+      <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/40 bg-background/40">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <ChevronRight className="h-3.5 w-3.5 text-violet-500 shrink-0" />
+          <span className="text-xs font-semibold truncate">LLM 思考过程 · 分章流式</span>
+          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-violet-500/30 text-violet-600 dark:text-violet-300 bg-violet-500/10 gap-0.5 shrink-0">
+            <Sparkles className="h-2.5 w-2.5" /> {completedCount}/{rows.length} 章节
+          </Badge>
+          {okCount > 0 && failCount === 0 && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 shrink-0">
+              ✓ 全部成功
+            </Badge>
+          )}
+          {failCount > 0 && (
+            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-rose-500/30 text-rose-600 bg-rose-500/10 shrink-0">
+              ✗ {failCount} 失败
+            </Badge>
+          )}
+          {running && completedCount < rows.length && (
+            <span className="text-[10px] text-violet-500 flex items-center gap-1 shrink-0">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              生成中…
+            </span>
+          )}
+        </div>
+      </div>
+      <div className="max-h-[28rem] overflow-y-auto thin-scroll p-2 space-y-1.5">
+        {rows.map((r) => {
+          const isRunning = r.status === 'running';
+          const isError = r.status === 'error';
+          return (
+            <details
+              key={r.key}
+              open={isRunning}
+              className={`group rounded-md border ${
+                isRunning ? 'border-violet-500/40 bg-violet-500/5' :
+                isError ? 'border-rose-500/30 bg-rose-500/5' :
+                'border-emerald-500/30 bg-emerald-500/5'
+              }`}
+            >
+              <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 select-none">
+                <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90 text-muted-foreground shrink-0" />
+                <span className="text-[11px] font-semibold text-foreground/90 shrink-0">
+                  {r.index || '?'}/{r.total || '?'}
+                </span>
+                <span className="text-[11px] font-medium text-foreground/80 truncate">{r.label || r.key}</span>
+                {isRunning && <Loader2 className="h-3 w-3 animate-spin text-violet-500 shrink-0" />}
+                {isError && <XCircle className="h-3 w-3 text-rose-500 shrink-0" />}
+                {!isRunning && !isError && <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />}
+                {r.durationMs != null && (
+                  <span className="text-[9px] text-muted-foreground/60 font-mono ml-auto shrink-0">
+                    {(r.durationMs / 1000).toFixed(1)}s · {r.content?.length ?? 0} chars
+                  </span>
+                )}
+              </summary>
+              <div className="px-3 pb-3 pt-1">
+                {r.content ? (
+                  <div className="rounded border border-border/30 bg-background/40 p-3 max-h-72 overflow-y-auto thin-scroll text-xs leading-relaxed prose prose-sm dark:prose-invert max-w-none">
+                    <LazyMarkdown>{r.content}</LazyMarkdown>
+                  </div>
+                ) : isError ? (
+                  <div className="rounded border border-rose-500/30 bg-rose-500/5 p-3 text-[11px] text-rose-600 dark:text-rose-300 font-mono break-all">
+                    {r.error || '未知错误'}
+                  </div>
+                ) : (
+                  <div className="rounded border border-border/30 bg-background/40 p-3 text-[11px] text-muted-foreground italic">
+                    <Loader2 className="h-3 w-3 animate-spin inline-block mr-2" />
+                    等待 LLM 响应…
+                  </div>
+                )}
+              </div>
+            </details>
+          );
+        })}
+      </div>
     </motion.div>
   );
 }
@@ -641,6 +952,16 @@ export function SettingsRunPanel() {
   const [evalForceBlast, setEvalForceBlast] = useState(false);
   const [evalSkipBlast, setEvalSkipBlast] = useState(true);
   const [evalMaxPdb, setEvalMaxPdb] = useState(80);
+  // BLAST homolog cap. Persisted to localStorage so users can keep their preferred number.
+  const [evalMaxBlastHits, setEvalMaxBlastHits] = useState<number>(() => {
+    if (typeof window === 'undefined') return 50;
+    const v = window.localStorage.getItem('evalMaxBlastHits');
+    const parsed = v ? parseInt(v, 10) : NaN;
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : 50;
+  });
+  useEffect(() => {
+    try { window.localStorage.setItem('evalMaxBlastHits', String(evalMaxBlastHits)); } catch {}
+  }, [evalMaxBlastHits]);
   const [evalGenerateReport, setEvalGenerateReport] = useState(true);
   const [evalSaveReportFile, setEvalSaveReportFile] = useState(true);
 
@@ -652,6 +973,20 @@ export function SettingsRunPanel() {
   const weeklyStream = useRunStream();
   const litStream = useRunStream();
   const evalStream = useRunStream();
+
+  // Refresh keys force `<RunHistoryPanel>` to reload when a run completes.
+  const [litRunCount, setLitRunCount] = useState(0);
+  const [evalRunCount, setEvalRunCount] = useState(0);
+  const [weeklyRunCount, setWeeklyRunCount] = useState(0);
+  useEffect(() => {
+    if (litStream.state.done) setLitRunCount(c => c + 1);
+  }, [litStream.state.done]);
+  useEffect(() => {
+    if (evalStream.state.done) setEvalRunCount(c => c + 1);
+  }, [evalStream.state.done]);
+  useEffect(() => {
+    if (weeklyStream.state.done) setWeeklyRunCount(c => c + 1);
+  }, [weeklyStream.state.done]);
 
   /* ── data fetch on open ─────────────────────────────────────────────── */
   useEffect(() => {
@@ -803,6 +1138,7 @@ export function SettingsRunPanel() {
       forceBlast: evalForceBlast,
       skipBlast: evalSkipBlast,
       maxPdb: evalMaxPdb,
+        maxBlastHits: evalMaxBlastHits,
       generateReport: evalGenerateReport,
       saveReportFile: evalSaveReportFile,
       llm: llmBody(),
@@ -940,8 +1276,8 @@ export function SettingsRunPanel() {
       </DialogTrigger>
 
       <DialogContent className="max-w-6xl sm:!max-w-6xl w-[95vw] max-h-[92vh] p-0 gap-0 overflow-hidden">
-        {/* ── Header band ─────────────────────────────────────────────── */}
-        <div className="relative px-6 pt-6 pb-4 border-b border-border/60 bg-gradient-to-br from-muted/40 via-background to-background">
+        {/* ── Header band (compact) ──────────────────────────────────── */}
+        <div className="relative px-6 pt-4 pb-3 border-b border-border/60 bg-gradient-to-br from-muted/40 via-background to-background">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,var(--tw-gradient-stops))] from-primary/5 via-transparent to-transparent pointer-events-none" />
           <DialogHeader className="relative">
             <DialogTitle className="flex items-center gap-2.5 text-lg">
@@ -958,29 +1294,34 @@ export function SettingsRunPanel() {
                 </Badge>
               )}
             </DialogTitle>
-            <DialogDescription className="text-xs leading-relaxed pt-1">
-              结构生物学智能任务中心 — 每日文献检索、蛋白靶点评估、PDB 周报生成三个模块。
-              支持并行触发，SSE 实时推送进度与日志，运行中可切换其他模块操作。自动检测 LLM CLI（hermes / claude / codex）或通过 Anthropic / OpenAI / z-ai SDK 调用。
+            <DialogDescription className="text-[11px] leading-relaxed pt-1 text-muted-foreground">
+              每日文献检索 · 蛋白靶点评估 · PDB 周报生成 — 支持并行触发、SSE 实时进度、自动 provider 选择（hermes / claude / codex / Anthropic / OpenAI）
             </DialogDescription>
           </DialogHeader>
         </div>
 
-        {/* ── LLM provider status bar ─────────────────────────────────── */}
+        {/* ── LLM provider status bar — 2-column compact layout ──────────── */}
         <div className="px-6 py-3 border-b border-border/60 bg-muted/20">
           <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2 min-w-0">
-              <Cpu className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-              <span className="text-[11px] text-muted-foreground shrink-0">LLM 提供方</span>
-              <code className="px-1.5 py-0.5 rounded bg-background border border-border/60 font-mono text-[11px] text-foreground">
+            <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
+              <div className="flex items-center gap-1.5 shrink-0">
+                <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-[11px] font-medium text-foreground">LLM 提供方</span>
+              </div>
+              <code className="px-2 py-0.5 rounded bg-background border border-border/60 font-mono text-[11px] text-foreground shrink-0">
                 {effectiveProviderId || (scanning ? '扫描中…' : '未检测')}
               </code>
-              {llmInfo?.available && llmInfo.available.length > 0 && (
-                <span className="text-[10px] text-muted-foreground/70 hidden sm:inline">
-                  {chosenProvider === AUTO_PROVIDER
-                    ? `auto · ${llmInfo.available.length} 可用 / 扫描 ${llmInfo.totalClisScanned} CLI`
-                    : `已锁定 · ${llmInfo.available.length} 可用`}
+              <div className="hidden sm:flex items-center gap-2 text-[10px] text-muted-foreground/70">
+                <span>
+                  {chosenProvider === AUTO_PROVIDER ? 'auto · ' : '🔒 已锁定 · '}
+                  <span className="font-mono">
+                    {llmInfo?.available?.length ?? 0}
+                  </span>
+                  可用
                 </span>
-              )}
+                <span className="opacity-50">/</span>
+                <span className="font-mono">{llmInfo?.totalClisScanned ?? 0} CLI</span>
+              </div>
             </div>
             <div className="flex items-center gap-1">
               <TooltipProvider delayDuration={300}>
@@ -1011,7 +1352,7 @@ export function SettingsRunPanel() {
                     ? 'border-primary/50 bg-primary/10 text-foreground font-medium shadow-sm'
                     : 'border-border/60 text-muted-foreground hover:text-foreground hover:border-border'
                 }`}
-                title="让服务器按 CLI → SDK → z-ai 顺序自动选择"
+                title="让服务器按 CLI → SDK 顺序自动选择"
               >
                 <Sparkles className="h-2.5 w-2.5" />
                 <span>auto</span>
@@ -1019,24 +1360,53 @@ export function SettingsRunPanel() {
               {llmInfo.available.map((a, i) => {
                 const isPinned = chosenProvider === a.provider;
                 const isEffective = effectiveProviderId === a.provider;
+                // Hover-only tooltip: provider name (left), then full bin path (right).
+                // Path is suppressed from the visible label to keep pills compact.
                 return (
-                  <button
-                    key={i}
-                    type="button"
-                    onClick={() => pickProvider(a.provider)}
-                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border transition-all ${
-                      isPinned
-                        ? 'border-primary/50 bg-primary/10 text-foreground font-medium shadow-sm'
-                        : isEffective
-                        ? 'border-emerald-500/40 text-foreground'
-                        : 'border-border/60 text-muted-foreground hover:text-foreground hover:border-border'
-                    }`}
-                    title={a.reason}
-                  >
-                    <span className="font-mono">{a.provider}</span>
-                    {a.bin && <span className="opacity-50">→ {a.bin.replace(/^.*\//, '~/')}</span>}
-                    {isPinned && <Lock className="h-2.5 w-2.5 opacity-70" />}
-                  </button>
+                  <TooltipProvider key={i} delayDuration={250}>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={() => pickProvider(a.provider)}
+                          className={`group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border transition-all ${
+                            isPinned
+                              ? 'border-primary/50 bg-primary/10 text-foreground shadow-sm'
+                              : isEffective
+                              ? 'border-emerald-500/40 bg-emerald-500/5 text-foreground'
+                              : 'border-border/60 text-muted-foreground hover:text-foreground hover:border-primary/40'
+                          }`}
+                        >
+                          {a.iconUrl ? (
+                            <img
+                              src={`/api/llm/icon?provider=${encodeURIComponent(a.provider)}&bin=${encodeURIComponent(a.bin || '')}`}
+                              alt={a.label}
+                              width={14}
+                              height={14}
+                              className="h-3.5 w-3.5 object-contain shrink-0"
+                              onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+                            />
+                          ) : (
+                            <span className="text-[12px] leading-none">{a.icon || '·'}</span>
+                          )}
+                          <span className="font-mono text-[11px]">{a.label || a.provider}</span>
+                          {a.via === 'wsl' && <span className="px-1 rounded bg-violet-500/15 text-violet-600 dark:text-violet-300 text-[8px] font-mono">WSL</span>}
+                          {a.via === 'sdk' && <span className="px-1 rounded bg-sky-500/15 text-sky-600 dark:text-sky-300 text-[8px] font-mono">SDK</span>}
+                          {isPinned && <Lock className="h-2.5 w-2.5 opacity-70" />}
+                          {isEffective && !isPinned && (
+                            <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          )}
+                        </button>
+                      </TooltipTrigger>
+                      <TooltipContent side="bottom" className="max-w-xs whitespace-pre-line text-left">
+                        <div className="font-mono text-[10px]">{a.label || a.provider}</div>
+                        {a.bin && (
+                          <div className="font-mono text-[10px] opacity-80 mt-0.5 break-all">📁 {a.bin}</div>
+                        )}
+                        <div className="text-[10px] opacity-70 mt-0.5">{a.reason}</div>
+                      </TooltipContent>
+                    </Tooltip>
+                  </TooltipProvider>
                 );
               })}
             </div>
@@ -1044,7 +1414,7 @@ export function SettingsRunPanel() {
 
           <div className="mt-1.5 text-[10px] text-muted-foreground/60">
             {chosenProvider === AUTO_PROVIDER
-              ? 'auto 模式：服务器按 CLI → SDK → z-ai 顺序自动选，锁定的 provider 显示 🔒'
+              ? 'auto 模式：服务器按 CLI → SDK 顺序自动选，锁定的 provider 显示 🔒'
               : `已锁定到 ${chosenProvider}。点 auto 或其他 provider 切换。`}
           </div>
 
@@ -1062,7 +1432,7 @@ export function SettingsRunPanel() {
                   <div className="col-span-2">
                     <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Provider</Label>
                     <Input
-                      placeholder="anthropic | openai | zai | cli:hermes | cli:claude | cli:codex | (空=auto)"
+                      placeholder="cli:hermes | cli:claude | cli:codex | anthropic | openai | (空=auto)"
                       value={llmCfg.provider}
                       onChange={e => setLlmCfg({ ...llmCfg, provider: e.target.value })}
                       className="h-8 text-xs mt-1 font-mono"
@@ -1222,6 +1592,8 @@ export function SettingsRunPanel() {
                     </div>
                   </div>
                 )}
+                {/* Recent runs for this module — refreshes after each completed run */}
+                <RunHistoryPanel moduleKey="literature" refreshKey={litRunCount} limit={5} />
               </ModuleCard>
             </TabsContent>
 
@@ -1246,6 +1618,11 @@ export function SettingsRunPanel() {
                       <Input type="number" min={1} max={500} value={evalMaxPdb} onChange={e => setEvalMaxPdb(parseInt(e.target.value || '80'))} className="h-8 text-xs" />
                     </Field>
                   </div>
+                  <div className="w-20">
+                    <Field label="BLAST 上限">
+                      <Input type="number" min={1} max={500} value={evalMaxBlastHits} onChange={e => setEvalMaxBlastHits(parseInt(e.target.value || '50'))} className="h-8 text-xs" />
+                    </Field>
+                  </div>
                   <ToggleChip checked={evalForceBlast} onCheckedChange={(v) => { setEvalForceBlast(v); if (v) setEvalSkipBlast(false); }} label="强制 BLAST" disabled={evalSkipBlast} />
                   <ToggleChip checked={evalSkipBlast} onCheckedChange={(v) => { setEvalSkipBlast(v); if (v) setEvalForceBlast(false); }} label="跳过 BLAST" disabled={evalForceBlast} />
                   <RunButton
@@ -1261,6 +1638,13 @@ export function SettingsRunPanel() {
                   done={evalStream.state.done}
                   ok={evalStream.state.ok}
                   emptyHint="输入 UniProt ID 并点击「执行」启动评估流水线"
+                />
+
+                {/* Per-chapter streamed LLM output (collapsible "thinking process") */}
+                <ChapterStream
+                  events={evalStream.state.log}
+                  running={evalStream.state.running}
+                  done={evalStream.state.done}
                 />
 
                 {/* LLM report inline preview (module ②) — shows real LLM output or failure */}
@@ -1296,6 +1680,8 @@ export function SettingsRunPanel() {
                     </Badge>
                   )}
                 </div>
+                {/* Recent runs for this module — refreshes after each completed run */}
+                <RunHistoryPanel moduleKey="eval" refreshKey={evalRunCount} limit={5} />
               </ModuleCard>
             </TabsContent>
 
@@ -1378,7 +1764,8 @@ export function SettingsRunPanel() {
                   emptyHint="选择 cycle 数并点击「立即触发」启动对抗式周报生成器"
                 />
               </ModuleCard>
-            </TabsContent>
+                            <RunHistoryPanel moduleKey="weekly" refreshKey={weeklyRunCount} limit={5} />
+              </TabsContent>
           </Tabs>
 
           {/* ── Execution log (shared) ─────────────────────────────────── */}
@@ -1503,7 +1890,7 @@ export function SettingsRunPanel() {
           </a>
           <div className="flex items-center gap-2 text-[10px] text-muted-foreground/60">
             <ShieldCheck className="h-3 w-3" />
-            <span>SSE 实时流式 · 并行执行 · 自动 provider 检测 · z-ai LLM</span>
+            <span>SSE 实时流式 · 并行执行 · 自动 provider 检测 · Hermes CLI 优先</span>
           </div>
         </div>
       </DialogContent>

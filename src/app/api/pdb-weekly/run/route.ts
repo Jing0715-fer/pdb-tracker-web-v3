@@ -25,8 +25,8 @@ export async function GET() {
 export async function POST(req: Request) {
   const body = await req.json().catch(() => ({}));
   const maxCycles: 1 | 2 | 3 = ([1, 2, 3].includes(Number(body.maxCycles)) ? Number(body.maxCycles) : 2) as 1 | 2 | 3;
-  const provider = body.llm?.provider || 'zai';
-  const model = body.llm?.model || 'glm-4.6';
+  const provider = body.llm?.provider || 'cli:hermes';
+  const model = body.llm?.model || 'hermes';
   const window = isoWeek(new Date());
   const { stream, progress, done } = sseStream();
   (async () => {

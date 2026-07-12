@@ -52,3 +52,47 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+
+# Build / distribution artifacts shipped in workspace tarball
+/db/*.db
+/db/*.db-journal
+/db/*.db-wal
+/download/
+/tool-results/
+/.zscripts/dev.pid
+/.zscripts/dev.out.log
+/.zscripts/prod.pid
+/.zscripts/prod.out.log
+/mini-services/
+/Atomworks/
+/Vitrual-lab/
+/foundry/
+/foundry-ui/
+
+# Bun build/cache
+.bun/
+bun.lockb
+
+# Local config / secrets
+.env
+.env.local
+.env.production
+.env.development
+
+# OS / editor cruft
+Thumbs.db
+.DS_Store
+*.swp
+.vscode/
+.idea/
+
+# Test / coverage output
+coverage/
+test-results/
+playwright-report/
+blob-report/
+
+# Local SQLite overrides (the repo ships db/custom.db for demos but local edits are noise)
+*.local.db
+*.local.db-journal

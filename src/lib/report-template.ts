@@ -24,6 +24,8 @@ export interface EvalDataForReport {
   };
   pdbTable: string; // pre-formatted markdown table rows
   blastTable: string;
+  /** Total number of PDB entries that `pdbTable` was derived from (may exceed visible rows in the table). */
+  pdbCount?: number;
 }
 
 export function buildReportSystemPrompt(): string {
@@ -188,4 +190,235 @@ export function buildMockBlastTable(count: number): string {
     rows.push(`| ${pdbId} | sp|P0${i} | ${ident}% | ${evalue} | ${d} |`);
   }
   return rows.join('\n');
+}
+
+
+/**
+ * Lighter report used when the model needs to be invoked chapter-by-chapter
+ * with real-time SSE streaming. Each chapter carries just what it needs from
+ * the full EvalDataForReport plus an explicit `chapterKey`.
+ */
+export type ReportChapterKey =
+  | 'summary'
+  | 'function'
+  | 'topology'
+  | 'pdb_analysis'
+  | 'feasibility'
+  | 'experimental'
+  | 'references'
+  | 'conclusion';
+
+export function buildChapterPrompt(
+  d: EvalDataForReport & { chapterKey: ReportChapterKey; chapterIndex: number; chapterTotal: number },
+): string {
+  const today = new Date().toISOString().slice(0, 10);
+  const ctxHeader = `# 数据上下文（可复用）
+| 字段 | 值 |
+|------|------|
+| UniProt ID | ${d.uniprot} |
+| Entry | ${d.entryName} |
+| 蛋白名 | ${d.proteinName} |
+| 基因 | ${d.geneNames} |
+| 物种 | ${d.organism} |
+| 序列长度 | ${d.sequenceLength} aa |
+| SIFTS 覆盖率 | ${d.coverage}% |
+| 直接 PDB 数 | ${d.directPdbCount} |
+| BLAST 同源数 | ${d.blastHitCount} |
+| X-ray 评分 | ${d.scores.xray.score}/10 (${d.scores.xray.rating || ''}) |
+| Cryo-EM 评分 | ${d.scores.cryoem.score}/10 (${d.scores.cryoem.rating || ''}) |
+| NMR 评分 | ${d.scores.nmr.score}/10 (${d.scores.nmr.rating || ''}) |
+| Overall 评分 | ${d.scores.overall.score}/10 (${d.scores.overall.rating || ''}) |
+
+---
+
+## 📊 完整 PDB 数据表（共 ${d.pdbCount ?? d.directPdbCount} 条，按分辨率/IF 排序）
+
+| # | PDB | 方法 | 分辨率(Å) | 期刊 (IF) | 配体 | 标题 |
+|---|------|------|-----------|----------|------|------|
+${d.pdbTable}
+
+---
+
+## 📊 完整 BLAST 同源数据表（共 ${d.blastHitCount} 条）
+
+| # | PDB | UniProt Ref | Description | Identity% | E-value | Query Cov. |
+|---|------|-----------|-------------|-----------|---------|------------|
+${d.blastTable}
+
+---
+
+# 任务：生成第 ${d.chapterIndex}/${d.chapterTotal} 章 **"${chapterTitleZh(d.chapterKey)}"**
+
+要求：
+1. **仅返回该章节的 Markdown 内容**，不要输出其他章节（前后章节会由其他调用生成）
+2. 中文输出，使用 markdown 格式
+3. 引用上面表格里的具体 PDB ID / 期刊 IF / E-value 等真实数字
+4. 长度 250-500 字（足够充实但不冗长）
+5. 章节标题单独占一行，前后空行
+`;
+
+  switch (d.chapterKey) {
+    case 'summary':
+      return ctxHeader + `
+执行摘要（2-3 段：蛋白功能概述 + 关键发现 + 推荐方向）。
+
+以 \`## 执行摘要\` 开头。`;
+    case 'function':
+      return ctxHeader + `
+### 1. 蛋白功能与生物学背景
+
+#### 1.1 基本功能
+（基于蛋白名称和物种推断其核心生物学功能）
+
+#### 1.2 调控机制
+（结合表观遗传 / 翻译后修饰 / 互作蛋白等简要说明）
+
+#### 1.3 疾病关联
+（基于蛋白名称和基因名推断相关疾病；无信息时说"暂无可靠数据"）
+
+以 \`## 1. 蛋白功能与生物学背景\` 开头，子标题保持 1.1 / 1.2 / 1.3。`;
+    case 'topology':
+      return ctxHeader + `
+### 2. 序列与拓扑结构
+
+#### 2.1 拓扑模型
+（基于长度 ${d.sequenceLength} aa + ${d.organism} 物种推断：膜蛋白/球状/酶等）
+
+#### 2.2 结构域解析
+（基于 PDB 数据中出现的配体和已解析 domain 推断各结构域的大致位置）
+
+以 \`## 2. 序列与拓扑结构\` 开头。`;
+    case 'pdb_analysis':
+      return ctxHeader + `
+### 3. 现有 PDB 结构分析
+
+#### 3.1 方法学分布
+（Cryo-EM / X-ray / NMR 各占比；高 IF 文章期刊分布）
+
+#### 3.2 代表性 PDB 结构
+**挑 3-5 个重要 PDB**（优先高分辨率 + 高 IF）写入，每个 1-2 行说明其科学意义。必须引用表格中的具体 PDB ID 和分辨率数字。
+
+#### 3.3 研究空白与发表机会
+（基于 SIFTS 覆盖率 ${d.coverage}% + BLAST 同源 ${d.blastHitCount} 条 + IF 最高期刊等推断 3 个具体可深入方向）
+
+以 \`## 3. 现有 PDB 结构分析\` 开头。`;
+    case 'feasibility':
+      return ctxHeader + `
+### 4. 结构解析可行性评估
+
+#### 4.1 评估维度对比
+
+| 维度 | Cryo-EM | X-ray | NMR |
+|------|---------|-------|-----|
+| 该蛋白适宜性 (基于分子量 ${d.sequenceLength} aa) | | | |
+| 已有 PDB 数据基础 | | | |
+| 整体评分 | ${d.scores.cryoem.score}/10 | ${d.scores.xray.score}/10 | ${d.scores.nmr.score}/10 |
+
+#### 4.2 综合结论
+（2-3 段：推荐方法 + 理由 + 备选方案）
+
+以 \`## 4. 结构解析可行性评估\` 开头。`;
+    case 'experimental':
+      return ctxHeader + `
+### 5. 实验方案（可选）
+
+#### 5.1 构建设计
+（基于 ${d.coverage}% 覆盖率 + ${d.directPdbCount} 直接 PDB 数据基础建议构建设计策略）
+
+#### 5.2 表达与样品制备流程
+（简要：表达系统/纯化/样品质量评估）
+
+#### 5.3 时间规划
+
+| 阶段 | 预计时间 | 预期结果 |
+|------|---------|---------|
+| 表达纯化 | 2-3 月 | 高纯度样品 |
+| 结构解析 | 3-6 月 | 原子模型 |
+| **总计** | **6-12 个月** | |
+
+以 \`## 5. 实验方案（可选）\` 开头。`;
+    case 'references':
+      return ctxHeader + `
+### 6. 重要参考文献
+
+**基于 PDB 数据表中的高 IF 期刊条目列出 3-5 个**，每条必须包含：作者(et al.)、期刊名称、IF 值、PDB ID、分辨率。
+
+以 \`## 6. 重要参考文献\` 开头，使用列表项格式：- Author et al., *Journal Name* (IF: XX.X), PDB XXXX, Y.Y Å.`;
+    case 'conclusion':
+      return ctxHeader + `
+### 7. 总结
+
+（4 段总结：
+1. 核心结论
+2. 此蛋白作为靶点的优劣势
+3. 与现有药物的关系
+4. 后续建议与展望）
+
+以 \`## 7. 总结\` 开头。`;
+  }
+}
+
+function chapterTitleZh(k: ReportChapterKey): string {
+  return ({
+    summary:     '执行摘要',
+    function:    '蛋白功能与生物学背景',
+    topology:    '序列与拓扑结构',
+    pdb_analysis:'现有 PDB 结构分析',
+    feasibility: '结构解析可行性评估',
+    experimental:'实验方案',
+    references:  '重要参考文献',
+    conclusion:  '总结',
+  } as Record<ReportChapterKey, string>)[k];
+}
+
+
+/**
+ * Render up to `maxRows` entries from a PdbEntryDetail[] to markdown table rows.
+ * Sorted by (resolution asc, journalIf desc) so the highest-impact + best-resolution
+ * come first. If the dataset has more than maxRows entries we still pass total count
+ * via the header so the LLM can mention it.
+ */
+export function buildDetailedPdbTable(
+  rows: Array<{
+    pdbId: string; method?: string | null; resolution?: number | null;
+    journal?: string | null; journalIf?: number | null; ligands?: string | null;
+    title?: string | null;
+  }>,
+  maxRows = 80,
+): string {
+  const sorted = [...rows].sort((a, b) => {
+    const aRes = a.resolution ?? 999;
+    const bRes = b.resolution ?? 999;
+    if (aRes !== bRes) return aRes - bRes;
+    const aIf = a.journalIf ?? -1;
+    const bIf = b.journalIf ?? -1;
+    return bIf - aIf;
+  });
+  const slice = sorted.slice(0, maxRows);
+  return slice.map((e, i) => {
+    const method = (e.method || '-').replace(/\|+/g, ' ').slice(0, 24);
+    const res = e.resolution != null ? e.resolution.toFixed(2) : '-';
+    const j = (e.journal || '-').replace(/\|+/g, ' ');
+    const ifStr = e.journalIf != null ? e.journalIf.toFixed(1) : '-';
+    const lig = (e.ligands || '-').replace(/\|+/g, ' ').slice(0, 20);
+    const title = (e.title || '-').replace(/\|+/g, ' ').replace(/\n+/g, ' ').slice(0, 60);
+    return `| ${i + 1} | ${e.pdbId} | ${method} | ${res} | ${j} (${ifStr}) | ${lig} | ${title} |`;
+  }).join('\n');
+}
+
+/** Render BLAST homolog rows. */
+export function buildDetailedBlastTable(
+  rows: Array<{
+    pdbId: string; uniprotRef?: string | null; description?: string | null;
+    identity?: number | null; evalue?: string | null; queryCoverage?: number | null;
+  }>,
+  maxRows = 80,
+): string {
+  const sorted = [...rows].sort((a, b) => (b.identity ?? 0) - (a.identity ?? 0));
+  const slice = sorted.slice(0, maxRows);
+  return slice.map((h, i) => {
+    const desc = (h.description || '-').replace(/\|+/g, ' ').slice(0, 40);
+    const cov = h.queryCoverage != null ? h.queryCoverage.toFixed(0) : '-';
+    return `| ${i + 1} | ${h.pdbId} | ${h.uniprotRef || '-'} | ${desc} | ${h.identity?.toFixed(1) ?? '-'} | ${h.evalue || '-'} | ${cov} |`;
+  }).join('\n');
 }

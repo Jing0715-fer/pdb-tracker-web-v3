@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "NODE_OPTIONS=\"--max-old-space-size=4096\" next dev --webpack -p 3000 2>&1 | tee dev.log",
-    "build": "next build --webpack && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/ && cp -r prisma .next/standalone/ && cp -r node_modules/@prisma .next/standalone/node_modules/@prisma && cp .env .next/standalone/.env",
+    "build": "next build --webpack",
     "start": "NODE_ENV=production node -r dotenv/config .next/standalone/server.js",
     "lint": "eslint .",
     "db:push": "prisma db push",

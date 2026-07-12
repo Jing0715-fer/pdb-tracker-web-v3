@@ -9,6 +9,8 @@ export interface SseEvent {
   message?: string;
   detail?: string;
   progress?: number;
+  /** Caller-defined extras — e.g. chapter content for streaming SSE chapter events. */
+  [key: string]: unknown;
 }
 
 export function sseStream() {

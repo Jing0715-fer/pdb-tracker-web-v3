@@ -1,0 +1,19 @@
+# Normalize line endings — Windows CRLF checkout, Unix LF in repo
+* text=auto eol=lf
+
+# Treat shell scripts as Unix LF (they're run on POSIX)
+*.sh text eol=lf
+
+# Binary files
+*.png binary
+*.ico binary
+*.icns binary
+*.webp binary
+*.gif binary
+*.jpg binary
+*.jpeg binary
+
+# Do not diff these
+*.db binary
+*.db-journal binary
+*.db-wal binary

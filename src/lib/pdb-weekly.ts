@@ -26,7 +26,7 @@
  * Provider selection:
  *   - Same fallback chain as `/api/llm/providers` exposes to the front-end
  *     Settings panel: local CLIs (hermes/claude/codex) → Anthropic SDK →
- *     OpenAI SDK → z-ai. Pass `LlmConfig` from the front-end to override.
+ *     OpenAI SDK (auto-fallback). Pass `LlmConfig` from the front-end to override.
  */
 
 import { spawn } from 'node:child_process';

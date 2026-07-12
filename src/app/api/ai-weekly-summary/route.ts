@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import Sdk from 'z-ai-web-dev-sdk';
+import { llmComplete } from '@/lib/llm';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,7 +17,6 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Build a concise data summary for the AI
     const totalStructures = entries.length;
     const methods = {
       cryoem: entries.filter((e: any) => e.isCryoem).length,
@@ -60,23 +59,24 @@ Please provide:
 
 Format as clean markdown with the section headers above.`;
 
-    const sdk = await Sdk.create();
-    const result = await sdk.chat.completions.create({
-      messages: [{ role: 'user', content: prompt }],
-      model: 'default',
+    const r = await llmComplete(prompt, {
+      provider: 'cli:hermes',
+      system: 'You are a structural biology expert producing weekly summaries of PDB structure releases.',
     });
 
-    const summary =
-      result?.choices?.[0]?.message?.content ||
-      result?.text ||
-      'Unable to generate weekly summary.';
+    if (!r.ok) {
+      return NextResponse.json(
+        { error: 'Failed to generate weekly summary', details: r.error || 'Unknown error' },
+        { status: 500 },
+      );
+    }
 
-    return NextResponse.json({ summary, weekId });
+    return NextResponse.json({ summary: r.text, weekId, provider: r.provider, model: r.model });
   } catch (error: any) {
     console.error('AI Weekly Summary generation error:', error);
     return NextResponse.json(
       { error: 'Failed to generate weekly summary', details: error?.message || 'Unknown error' },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

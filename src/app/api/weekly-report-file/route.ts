@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     try { cycles = run.cyclesJson ? JSON.parse(run.cyclesJson) : []; } catch { cycles = []; }
     const reportType = run.reportTypes || 'cryoem+xray';
     const filesWritten = (run.filesWritten || '').split('\n').filter(Boolean);
-    const providers = run.providers || 'zai';
+    const providers = run.providers || 'cli:hermes';
     const duration = run.durationMs ? `${(run.durationMs / 1000).toFixed(1)}s` : 'unknown';
 
     // Extract actual LLM-generated content from cycles

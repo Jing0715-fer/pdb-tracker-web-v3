@@ -16,6 +16,20 @@ export interface StreamEvent {
   message?: string;      // headline
   detail?: string;       // verbose payload
   progress?: number;     // 0..100 (optional)
+  /** Chapter streaming: id of the chapter this event refers to. */
+  chapter?: string;
+  /** 1-based chapter index within the report. */
+  chapterIndex?: number;
+  /** Total chapters in the report. */
+  chapterTotal?: number;
+  /** Streamed chapter text (set on `chapter_done` events). */
+  chapterContent?: string;
+  /** Error message for the chapter (set on `chapter_done` failure). */
+  chapterError?: string;
+  /** Per-chapter generation duration (ms). */
+  chapterDurationMs?: number;
+  /** Caller-defined extras — forward-compatible. */
+  [key: string]: unknown;
 }
 
 export interface StreamState {
@@ -105,6 +119,7 @@ export function useRunStream() {
             try { payload = JSON.parse(dataStr); } catch { /* keep as string */ }
 
             if (eventName === 'progress' || eventName === 'log' || eventName === 'message') {
+              // Strip the noise (ts is generated server-side; everything else from payload).
               const ev: StreamEvent = {
                 ts: payload?.ts || new Date().toISOString(),
                 stage: payload?.stage,
@@ -112,6 +127,12 @@ export function useRunStream() {
                 message: payload?.message,
                 detail: payload?.detail,
                 progress: typeof payload?.progress === 'number' ? payload.progress : undefined,
+                chapter: payload?.chapter,
+                chapterIndex: payload?.chapterIndex,
+                chapterTotal: payload?.chapterTotal,
+                chapterContent: payload?.chapterContent,
+                chapterError: payload?.chapterError,
+                chapterDurationMs: payload?.chapterDurationMs,
               };
               setState(s => ({ ...s, log: [...s.log, ev].slice(-300) }));
             } else if (eventName === 'done' || eventName === 'result') {

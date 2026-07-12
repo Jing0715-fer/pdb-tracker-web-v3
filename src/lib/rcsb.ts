@@ -55,3 +55,42 @@ export async function fetchPdbIdsForUniprot(uniprotId: string, max = 80): Promis
     return (data.result_set || []).map((r: any) => r.identifier);
   } catch { return []; }
 }
+
+
+export interface UniprotMeta {
+  uniprotId: string;
+  entryName: string;
+  proteinName: string;
+  geneNames: string;
+  organism: string;
+  sequenceLength: number;
+  sequence?: string;
+}
+
+export async function fetchUniprotMeta(uniprotId: string): Promise<UniprotMeta | null> {
+  try {
+    const url = `https://rest.uniprot.org/uniprotkb/${uniprotId}.json`;
+    const res = await fetch(url, { headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15000) });
+    if (!res.ok) return null;
+    const data = await res.json();
+    const desc = data?.proteinDescription || {};
+    const recName = desc?.recommendedName?.fullName?.value
+      || desc?.submissionNames?.[0]?.fullName?.value
+      || '';
+    const altNames = (desc?.alternativeNames || []).map((a: any) => a?.fullName?.value).filter(Boolean);
+    const geneNames = (data?.genes || []).map((g: any) => g?.geneName?.value).filter(Boolean);
+    const organism = data?.organism?.names?.[0]?.value || '';
+    const seqLen = data?.sequence?.length || 0;
+    return {
+      uniprotId,
+      entryName: data?.primaryAccession || uniprotId,
+      proteinName: recName || altNames[0] || uniprotId,
+      geneNames: geneNames.join(', '),
+      organism,
+      sequenceLength: seqLen,
+    };
+  } catch (err: any) {
+    console.warn(`[fetchUniprotMeta] ${uniprotId} failed: ${err?.message}`);
+    return null;
+  }
+}
