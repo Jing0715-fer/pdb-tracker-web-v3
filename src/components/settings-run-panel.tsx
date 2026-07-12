@@ -67,6 +67,7 @@ import {
   Activity,
   Cpu,
   Database,
+  Save,
   FileText,
   Zap,
   ShieldCheck,
@@ -962,6 +963,46 @@ export function SettingsRunPanel() {
   useEffect(() => {
     try { window.localStorage.setItem('evalMaxBlastHits', String(evalMaxBlastHits)); } catch {}
   }, [evalMaxBlastHits]);
+  // Database path config
+  const [dbPath, setDbPath] = useState('file:./db/custom.db');
+  const [dbPathSaving, setDbPathSaving] = useState(false);
+  const [dbPathStatus, setDbPathStatus] = useState<string | null>(null);
+
+  const loadDbPath = useCallback(async () => {
+    try {
+      const res = await fetch('/api/db-config');
+      const data = await res.json();
+      if (data.dbPath) setDbPath(data.dbPath);
+      setDbPathStatus('✓ 已加载');
+    } catch {
+      setDbPathStatus('✗ 加载失败');
+    }
+  }, []);
+
+  const saveDbPath = useCallback(async () => {
+    setDbPathSaving(true);
+    setDbPathStatus(null);
+    try {
+      const res = await fetch('/api/db-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dbPath }),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setDbPathStatus('✓ 已保存，重启服务器后生效');
+      } else {
+        setDbPathStatus(`✗ ${data.error || '保存失败'}`);
+      }
+    } catch (err: any) {
+      setDbPathStatus(`✗ ${err?.message || '网络错误'}`);
+    } finally {
+      setDbPathSaving(false);
+    }
+  }, [dbPath]);
+
+  // Load DB path on mount
+  useEffect(() => { loadDbPath(); }, []);
   const [evalGenerateReport, setEvalGenerateReport] = useState(true);
   const [evalSaveReportFile, setEvalSaveReportFile] = useState(true);
 
@@ -1477,7 +1518,50 @@ export function SettingsRunPanel() {
                   </div>
                 </div>
               </motion.div>
-            )}
+            )
+                {/* ── Database config ──────────────────────────────────────── */}
+                <div className="mt-4 border-t border-border/40 pt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-1.5">
+                      <Database className="h-3.5 w-3.5 text-muted-foreground" />
+                      <span className="text-[11px] font-medium text-foreground">数据库</span>
+                    </div>
+                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-amber-500/30 text-amber-600 bg-amber-500/10 gap-0.5">
+                      <RefreshCw className="h-2 w-2" /> 重启生效
+                    </Badge>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      value={dbPath}
+                      onChange={e => setDbPath(e.target.value)}
+                      placeholder="file:./db/custom.db"
+                      className="h-8 text-xs font-mono flex-1"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs shrink-0"
+                      onClick={saveDbPath}
+                      disabled={dbPathSaving}
+                    >
+                      {dbPathSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                      <span className="ml-1">保存</span>
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-xs shrink-0"
+                      onClick={loadDbPath}
+                    >
+                      <RefreshCw className="h-3 w-3" />
+                    </Button>
+                  </div>
+                  {dbPathStatus && (
+                    <div className={`mt-1 text-[10px] ${dbPathStatus.startsWith('✓') ? 'text-emerald-600' : 'text-rose-500'}`}>
+                      {dbPathStatus}
+                    </div>
+                  )}
+                </div>}
           </AnimatePresence>
         </div>
 
