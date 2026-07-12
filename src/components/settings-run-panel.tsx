@@ -236,7 +236,7 @@ function StreamFeed({
     return (
       <div className="mt-3 rounded-lg border border-dashed border-border/60 bg-muted/20 px-3 py-4 text-center">
         <Terminal className="mx-auto h-4 w-4 text-muted-foreground/60" />
-        <p className="mt-1.5 text-[11px] text-muted-foreground">{emptyHint}</p>
+        <p className="mt-1.5 text-sm text-muted-foreground">{emptyHint}</p>
       </div>
     );
   }
@@ -246,10 +246,10 @@ function StreamFeed({
       {/* header */}
       <div className="flex items-center justify-between gap-2 px-3 py-1.5 border-b border-border/60 bg-muted/40">
         <div className="flex items-center gap-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">实时进度</span>
-          <span className="text-[10px] text-muted-foreground/70">({events.length} events)</span>
+          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">实时进度</span>
+          <span className="text-xs text-muted-foreground/70">({events.length} events)</span>
           {running && startTime && (
-            <span className="text-[10px] font-mono text-sky-600 dark:text-sky-300 tabular-nums flex items-center gap-0.5">
+            <span className="text-xs font-mono text-sky-600 dark:text-sky-300 tabular-nums flex items-center gap-0.5">
               <Clock className="h-2.5 w-2.5" />{(elapsed / 1000).toFixed(1)}s
             </span>
           )}
@@ -258,7 +258,7 @@ function StreamFeed({
           <button
             type="button"
             onClick={() => setAutoScroll(a => !a)}
-            className={`text-[9px] px-1.5 py-0.5 rounded border transition-colors ${autoScroll ? 'border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10' : 'border-border/60 text-muted-foreground hover:text-foreground'}`}
+            className={`text-2xs px-1.5 py-0.5 rounded border transition-colors ${autoScroll ? 'border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10' : 'border-border/60 text-muted-foreground hover:text-foreground'}`}
             title={autoScroll ? '自动滚动中，点击暂停' : '已暂停，点击恢复'}
           >
             {autoScroll ? '⤓ auto' : '⏸ paused'}
@@ -271,11 +271,11 @@ function StreamFeed({
       {typeof lastProgress === 'number' && (
         <div className="px-3 pt-2.5 pb-1.5">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-[9px] font-mono text-muted-foreground tabular-nums">
+            <span className="text-2xs font-mono text-muted-foreground tabular-nums">
               {lastProgress < 100 ? 'processing' : 'complete'} · {lastProgress}%
             </span>
             {done && (
-              <span className={`text-[10px] font-mono font-semibold tabular-nums ${ok ? 'text-emerald-500' : 'text-rose-500'}`}>
+              <span className={`text-xs font-mono font-semibold tabular-nums ${ok ? 'text-emerald-500' : 'text-rose-500'}`}>
                 {ok ? '✓' : '✗'} {(elapsed / 1000).toFixed(1)}s
               </span>
             )}
@@ -306,7 +306,7 @@ function StreamFeed({
           const txt = (e.detail || e.message || e.stage || '').toString().trim();
           if (!txt) return null;
           return (
-            <div key={i} className="text-[10px] font-mono flex gap-2 leading-relaxed">
+            <div key={i} className="text-xs font-mono flex gap-2 leading-relaxed">
               <span className="text-muted-foreground/60 shrink-0 tabular-nums">
                 {new Date(e.ts).toLocaleTimeString('en-GB', { hour12: false })}
               </span>
@@ -356,8 +356,8 @@ function StageTimeline({ events }: { events: StreamEvent[] }) {
             <div key={stage} className="flex items-center shrink-0">
               <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-background/60 border border-border/40">
                 <span className={`h-1.5 w-1.5 rounded-full ${dotColor} ${isLast && !info.level ? 'animate-pulse' : ''}`} />
-                <span className="text-[9px] font-mono text-muted-foreground whitespace-nowrap">{stage}</span>
-                {info.count > 1 && <span className="text-[8px] text-muted-foreground/50">×{info.count}</span>}
+                <span className="text-2xs font-mono text-muted-foreground whitespace-nowrap">{stage}</span>
+                {info.count > 1 && <span className="text-3xs text-muted-foreground/50">×{info.count}</span>}
               </div>
               {!isLast && <span className="text-muted-foreground/30 mx-0.5">→</span>}
             </div>
@@ -444,33 +444,33 @@ function LLMPreview({
           <span className="text-xs font-semibold truncate">{title}</span>
           {/* LLM status badge — clearly shows real success vs failure */}
           {ok === true && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 gap-0.5 shrink-0">
+            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 gap-0.5 shrink-0">
               <CheckCircle2 className="h-2.5 w-2.5" /> LLM 真实生成
             </Badge>
           )}
           {isFailure && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
+            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
               <XCircle className="h-2.5 w-2.5" /> LLM 调用失败
             </Badge>
           )}
           {/* DB persistence badge */}
           {dbSaved === true && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10 gap-0.5 shrink-0">
+            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10 gap-0.5 shrink-0">
               <Database className="h-2.5 w-2.5" /> 已入库
             </Badge>
           )}
           {dbSaved === false && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
+            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
               <Database className="h-2.5 w-2.5" /> 入库失败
             </Badge>
           )}
           {!isFailure && (
-            <Badge variant="outline" className={`text-[9px] px-1 py-0 h-4 ${a.badge} gap-0.5 shrink-0`}>
+            <Badge variant="outline" className={`text-2xs px-1 py-0 h-4 ${a.badge} gap-0.5 shrink-0`}>
               <Sparkles className="h-2.5 w-2.5" /> {provider}/{model}
             </Badge>
           )}
-          {chars != null && <span className="text-[9px] text-muted-foreground/60 font-mono shrink-0">{chars} chars</span>}
-          {durationMs != null && <span className="text-[9px] text-muted-foreground/60 font-mono shrink-0 hidden sm:inline">{(durationMs / 1000).toFixed(1)}s</span>}
+          {chars != null && <span className="text-2xs text-muted-foreground/60 font-mono shrink-0">{chars} chars</span>}
+          {durationMs != null && <span className="text-2xs text-muted-foreground/60 font-mono shrink-0 hidden sm:inline">{(durationMs / 1000).toFixed(1)}s</span>}
         </button>
         <div className="flex items-center gap-1 shrink-0">
           <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={copy} title="复制原文">
@@ -498,10 +498,10 @@ function LLMPreview({
                   <AlertTriangle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
                   <div className="min-w-0">
                     <div className="text-xs font-semibold text-rose-600 dark:text-rose-300 mb-1">LLM 调用失败</div>
-                    <div className="text-[11px] text-muted-foreground font-mono break-all">
+                    <div className="text-sm text-muted-foreground font-mono break-all">
                       {error || '未知错误'}
                     </div>
-                    <div className="text-[10px] text-muted-foreground/70 mt-2">
+                    <div className="text-xs text-muted-foreground/70 mt-2">
                       本次运行未生成报告文本（已跳过 fallback，不伪造内容）。请检查 hermes / claude / codex CLI 是否在 PATH 上，或设置 ANTHROPIC_API_KEY / OPENAI_API_KEY 后重试。
                     </div>
                   </div>
@@ -568,7 +568,7 @@ function RunHistoryPanel({
 
   if (loading) {
     return (
-      <div className="px-3 py-2 flex items-center gap-2 text-[10px] text-muted-foreground/60 border-t border-border/40 bg-background/30">
+      <div className="px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground/60 border-t border-border/40 bg-background/30">
         <Loader2 className="h-3 w-3 animate-spin" />
         加载运行历史…
       </div>
@@ -594,7 +594,7 @@ function RunHistoryPanel({
     <div className="px-3 py-2 border-t border-border/40 bg-background/30">
       <div className="flex items-center gap-2 mb-1.5">
         <History className="h-3 w-3 text-muted-foreground/70" />
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground/70">
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground/70">
           最近 {rows.length} 次运行
         </span>
       </div>
@@ -617,14 +617,14 @@ function RunHistoryPanel({
                 ) : (
                   <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
                 )}
-                <span className="text-[10px] font-mono text-muted-foreground shrink-0">{fmtTime(r.createdAt)}</span>
-                <span className="text-[11px] truncate flex-1" title={r.summary}>{r.summary}</span>
+                <span className="text-xs font-mono text-muted-foreground shrink-0">{fmtTime(r.createdAt)}</span>
+                <span className="text-sm truncate flex-1" title={r.summary}>{r.summary}</span>
                 {r.provider && (
-                  <span className="text-[9px] font-mono text-muted-foreground/70 shrink-0 hidden sm:inline truncate max-w-[100px]" title={`${r.provider}/${r.model}`}>
+                  <span className="text-2xs font-mono text-muted-foreground/70 shrink-0 hidden sm:inline truncate max-w-[100px]" title={`${r.provider}/${r.model}`}>
                     {r.provider}/{r.model}
                   </span>
                 )}
-                <span className="text-[9px] text-muted-foreground/60 font-mono shrink-0">{fmtDur(r.durationMs)}</span>
+                <span className="text-2xs text-muted-foreground/60 font-mono shrink-0">{fmtDur(r.durationMs)}</span>
                 <ChevronRight className={`h-3 w-3 text-muted-foreground/60 transition-transform shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
               </button>
               <AnimatePresence initial={false}>
@@ -638,11 +638,11 @@ function RunHistoryPanel({
                   >
                     <div className="px-2 pb-2 pt-1 space-y-1 border-t border-border/30">
                       {r.llmError && (
-                        <div className="rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1 text-[10px] font-mono text-rose-600 dark:text-rose-300 break-all">
+                        <div className="rounded border border-rose-500/30 bg-rose-500/5 px-2 py-1 text-xs font-mono text-rose-600 dark:text-rose-300 break-all">
                           {r.llmError}
                         </div>
                       )}
-                      <div className="grid grid-cols-2 gap-1 text-[10px]">
+                      <div className="grid grid-cols-2 gap-1 text-xs">
                         <div className="text-muted-foreground/70">status: <span className="font-mono">{r.status}</span></div>
                         <div className="text-muted-foreground/70">provider: <span className="font-mono">{r.provider || '—'}</span></div>
                         <div className="text-muted-foreground/70">model: <span className="font-mono">{r.model || '—'}</span></div>
@@ -744,21 +744,21 @@ function ChapterStream({
         <div className="flex items-center gap-2 min-w-0 flex-1">
           <ChevronRight className="h-3.5 w-3.5 text-violet-500 shrink-0" />
           <span className="text-xs font-semibold truncate">LLM 思考过程 · 分章流式</span>
-          <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-violet-500/30 text-violet-600 dark:text-violet-300 bg-violet-500/10 gap-0.5 shrink-0">
+          <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-violet-500/30 text-violet-600 dark:text-violet-300 bg-violet-500/10 gap-0.5 shrink-0">
             <Sparkles className="h-2.5 w-2.5" /> {completedCount}/{rows.length} 章节
           </Badge>
           {okCount > 0 && failCount === 0 && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 shrink-0">
+            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 shrink-0">
               ✓ 全部成功
             </Badge>
           )}
           {failCount > 0 && (
-            <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-rose-500/30 text-rose-600 bg-rose-500/10 shrink-0">
+            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-rose-500/30 text-rose-600 bg-rose-500/10 shrink-0">
               ✗ {failCount} 失败
             </Badge>
           )}
           {running && completedCount < rows.length && (
-            <span className="text-[10px] text-violet-500 flex items-center gap-1 shrink-0">
+            <span className="text-xs text-violet-500 flex items-center gap-1 shrink-0">
               <Loader2 className="h-3 w-3 animate-spin" />
               生成中…
             </span>
@@ -781,15 +781,15 @@ function ChapterStream({
             >
               <summary className="cursor-pointer list-none px-3 py-2 flex items-center gap-2 select-none">
                 <ChevronRight className="h-3 w-3 transition-transform group-open:rotate-90 text-muted-foreground shrink-0" />
-                <span className="text-[11px] font-semibold text-foreground/90 shrink-0">
+                <span className="text-sm font-semibold text-foreground/90 shrink-0">
                   {r.index || '?'}/{r.total || '?'}
                 </span>
-                <span className="text-[11px] font-medium text-foreground/80 truncate">{r.label || r.key}</span>
+                <span className="text-sm font-medium text-foreground/80 truncate">{r.label || r.key}</span>
                 {isRunning && <Loader2 className="h-3 w-3 animate-spin text-violet-500 shrink-0" />}
                 {isError && <XCircle className="h-3 w-3 text-rose-500 shrink-0" />}
                 {!isRunning && !isError && <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />}
                 {r.durationMs != null && (
-                  <span className="text-[9px] text-muted-foreground/60 font-mono ml-auto shrink-0">
+                  <span className="text-2xs text-muted-foreground/60 font-mono ml-auto shrink-0">
                     {(r.durationMs / 1000).toFixed(1)}s · {r.content?.length ?? 0} chars
                   </span>
                 )}
@@ -800,11 +800,11 @@ function ChapterStream({
                     <LazyMarkdown>{r.content}</LazyMarkdown>
                   </div>
                 ) : isError ? (
-                  <div className="rounded border border-rose-500/30 bg-rose-500/5 p-3 text-[11px] text-rose-600 dark:text-rose-300 font-mono break-all">
+                  <div className="rounded border border-rose-500/30 bg-rose-500/5 p-3 text-sm text-rose-600 dark:text-rose-300 font-mono break-all">
                     {r.error || '未知错误'}
                   </div>
                 ) : (
-                  <div className="rounded border border-border/30 bg-background/40 p-3 text-[11px] text-muted-foreground italic">
+                  <div className="rounded border border-border/30 bg-background/40 p-3 text-sm text-muted-foreground italic">
                     <Loader2 className="h-3 w-3 animate-spin inline-block mr-2" />
                     等待 LLM 响应…
                   </div>
@@ -864,8 +864,8 @@ function CycleTimeline({
     <div className="mt-3 rounded-lg border border-border/60 bg-gradient-to-br from-amber-500/5 via-transparent to-transparent p-3">
       <div className="flex items-center gap-2 mb-2.5">
         <Layers className="h-3 w-3 text-amber-500" />
-        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Cycle Orchestration</span>
-        <span className="text-[10px] text-muted-foreground/60">· {maxCycles}-step pipeline</span>
+        <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Cycle Orchestration</span>
+        <span className="text-xs text-muted-foreground/60">· {maxCycles}-step pipeline</span>
       </div>
 
       {/* horizontal track */}
@@ -888,16 +888,16 @@ function CycleTimeline({
                     )}
                     <span className={`relative inline-flex h-2 w-2 rounded-full ${r.completed ? c.dot : r.started ? c.dot : 'bg-muted-foreground/30'}`} />
                   </span>
-                  <span className="text-[10px] font-semibold truncate">{r.label}</span>
+                  <span className="text-xs font-semibold truncate">{r.label}</span>
                   {r.completed && <CheckCircle2 className={`h-3 w-3 ${c.text} shrink-0`} />}
                   {r.verdict && (
-                    <Badge variant="outline" className={`text-[8px] px-1 py-0 h-3.5 ${r.verdict === 'pass' ? 'border-emerald-500/30 text-emerald-600' : 'border-amber-500/30 text-amber-600'}`}>
+                    <Badge variant="outline" className={`text-3xs px-1 py-0 h-3.5 ${r.verdict === 'pass' ? 'border-emerald-500/30 text-emerald-600' : 'border-amber-500/30 text-amber-600'}`}>
                       {r.verdict}
                     </Badge>
                   )}
                 </div>
-                <div className="text-[9px] text-muted-foreground truncate">{r.desc}</div>
-                <div className="text-[9px] font-mono text-muted-foreground/60 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <div className="text-2xs text-muted-foreground truncate">{r.desc}</div>
+                <div className="text-2xs font-mono text-muted-foreground/60 mt-0.5 flex items-center gap-1.5 flex-wrap">
                   {r.completed ? (
                     <>
                       <span className="flex items-center gap-0.5"><Clock className="h-2 w-2" />{((r.durationMs || 0) / 1000).toFixed(1)}s</span>
@@ -1309,7 +1309,7 @@ export function SettingsRunPanel() {
           <Settings2 className="h-3.5 w-3.5" />
           <span className="hidden sm:inline">运行中心</span>
           {running.size > 0 && (
-            <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sky-500 text-white text-[8px] font-bold px-1">
+            <span className="absolute -top-1 -right-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-sky-500 text-white text-3xs font-bold px-1">
               {running.size}
             </span>
           )}
@@ -1326,16 +1326,16 @@ export function SettingsRunPanel() {
                 <Sparkles className="h-4.5 w-4.5 text-primary" />
               </div>
               <span>运行中心</span>
-              <Badge variant="outline" className="ml-1 text-[10px] font-normal text-muted-foreground border-border/60">
+              <Badge variant="outline" className="ml-1 text-xs font-normal text-muted-foreground border-border/60">
                 <Layers className="h-2.5 w-2.5 mr-1" /> 3 modules
               </Badge>
               {running.size > 0 && (
-                <Badge variant="outline" className="ml-1 text-[10px] font-normal bg-sky-500/10 text-sky-600 dark:text-sky-300 border-sky-500/30 gap-1">
+                <Badge variant="outline" className="ml-1 text-xs font-normal bg-sky-500/10 text-sky-600 dark:text-sky-300 border-sky-500/30 gap-1">
                   <Loader2 className="h-2.5 w-2.5 animate-spin" /> {running.size} running
                 </Badge>
               )}
             </DialogTitle>
-            <DialogDescription className="text-[11px] leading-relaxed pt-1 text-muted-foreground">
+            <DialogDescription className="text-sm leading-relaxed pt-1 text-muted-foreground">
               每日文献检索 · 蛋白靶点评估 · PDB 周报生成 — 支持并行触发、SSE 实时进度、自动 provider 选择（hermes / claude / codex / Anthropic / OpenAI）
             </DialogDescription>
           </DialogHeader>
@@ -1347,12 +1347,12 @@ export function SettingsRunPanel() {
             <div className="flex items-center gap-2.5 min-w-0 flex-wrap">
               <div className="flex items-center gap-1.5 shrink-0">
                 <Cpu className="h-3.5 w-3.5 text-muted-foreground" />
-                <span className="text-[11px] font-medium text-foreground">LLM 提供方</span>
+                <span className="text-sm font-medium text-foreground">LLM 提供方</span>
               </div>
-              <code className="px-2 py-0.5 rounded bg-background border border-border/60 font-mono text-[11px] text-foreground shrink-0">
+              <code className="px-2 py-0.5 rounded bg-background border border-border/60 font-mono text-sm text-foreground shrink-0">
                 {effectiveProviderId || (scanning ? '扫描中…' : '未检测')}
               </code>
-              <div className="hidden sm:flex items-center gap-2 text-[10px] text-muted-foreground/70">
+              <div className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground/70">
                 <span>
                   {chosenProvider === AUTO_PROVIDER ? 'auto · ' : '🔒 已锁定 · '}
                   <span className="font-mono">
@@ -1375,7 +1375,7 @@ export function SettingsRunPanel() {
                   <TooltipContent side="top">重新扫描 CLI / SDK</TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              <Button variant="ghost" size="sm" className="h-7 text-[11px] gap-1" onClick={() => setShowLlmCfg(s => !s)}>
+              <Button variant="ghost" size="sm" className="h-7 text-sm gap-1" onClick={() => setShowLlmCfg(s => !s)}>
                 <ChevronDown className={`h-3 w-3 transition-transform ${showLlmCfg ? 'rotate-180' : ''}`} />
                 {showLlmCfg ? '收起配置' : 'LLM 配置'}
               </Button>
@@ -1388,7 +1388,7 @@ export function SettingsRunPanel() {
               <button
                 type="button"
                 onClick={() => pickProvider(AUTO_PROVIDER)}
-                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] border transition-all ${
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs border transition-all ${
                   chosenProvider === AUTO_PROVIDER
                     ? 'border-primary/50 bg-primary/10 text-foreground font-medium shadow-sm'
                     : 'border-border/60 text-muted-foreground hover:text-foreground hover:border-border'
@@ -1410,7 +1410,7 @@ export function SettingsRunPanel() {
                         <button
                           type="button"
                           onClick={() => pickProvider(a.provider)}
-                          className={`group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-medium border transition-all ${
+                          className={`group inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-all ${
                             isPinned
                               ? 'border-primary/50 bg-primary/10 text-foreground shadow-sm'
                               : isEffective
@@ -1430,9 +1430,9 @@ export function SettingsRunPanel() {
                           ) : (
                             <span className="text-[12px] leading-none">{a.icon || '·'}</span>
                           )}
-                          <span className="font-mono text-[11px]">{a.label || a.provider}</span>
-                          {a.via === 'wsl' && <span className="px-1 rounded bg-violet-500/15 text-violet-600 dark:text-violet-300 text-[8px] font-mono">WSL</span>}
-                          {a.via === 'sdk' && <span className="px-1 rounded bg-sky-500/15 text-sky-600 dark:text-sky-300 text-[8px] font-mono">SDK</span>}
+                          <span className="font-mono text-sm">{a.label || a.provider}</span>
+                          {a.via === 'wsl' && <span className="px-1 rounded bg-violet-500/15 text-violet-600 dark:text-violet-300 text-3xs font-mono">WSL</span>}
+                          {a.via === 'sdk' && <span className="px-1 rounded bg-sky-500/15 text-sky-600 dark:text-sky-300 text-3xs font-mono">SDK</span>}
                           {isPinned && <Lock className="h-2.5 w-2.5 opacity-70" />}
                           {isEffective && !isPinned && (
                             <span className="ml-0.5 h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
@@ -1440,11 +1440,11 @@ export function SettingsRunPanel() {
                         </button>
                       </TooltipTrigger>
                       <TooltipContent side="bottom" className="max-w-xs whitespace-pre-line text-left">
-                        <div className="font-mono text-[10px]">{a.label || a.provider}</div>
+                        <div className="font-mono text-xs">{a.label || a.provider}</div>
                         {a.bin && (
-                          <div className="font-mono text-[10px] opacity-80 mt-0.5 break-all">📁 {a.bin}</div>
+                          <div className="font-mono text-xs opacity-80 mt-0.5 break-all">📁 {a.bin}</div>
                         )}
-                        <div className="text-[10px] opacity-70 mt-0.5">{a.reason}</div>
+                        <div className="text-xs opacity-70 mt-0.5">{a.reason}</div>
                       </TooltipContent>
                     </Tooltip>
                   </TooltipProvider>
@@ -1453,7 +1453,7 @@ export function SettingsRunPanel() {
             </div>
           )}
 
-          <div className="mt-1.5 text-[10px] text-muted-foreground/60">
+          <div className="mt-1.5 text-xs text-muted-foreground/60">
             {chosenProvider === AUTO_PROVIDER
               ? 'auto 模式：服务器按 CLI → SDK 顺序自动选，锁定的 provider 显示 🔒'
               : `已锁定到 ${chosenProvider}。点 auto 或其他 provider 切换。`}
@@ -1471,7 +1471,7 @@ export function SettingsRunPanel() {
               >
                 <div className="mt-3 pt-3 border-t border-border/40 grid grid-cols-2 gap-2.5">
                   <div className="col-span-2">
-                    <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Provider</Label>
+                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Provider</Label>
                     <Input
                       placeholder="cli:hermes | cli:claude | cli:codex | anthropic | openai | (空=auto)"
                       value={llmCfg.provider}
@@ -1480,7 +1480,7 @@ export function SettingsRunPanel() {
                     />
                   </div>
                   <div>
-                    <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">API Key</Label>
+                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">API Key</Label>
                     <Input
                       type="password"
                       placeholder="sk-…"
@@ -1490,7 +1490,7 @@ export function SettingsRunPanel() {
                     />
                   </div>
                   <div>
-                    <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Base URL</Label>
+                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Base URL</Label>
                     <Input
                       placeholder="https://api.openai.com/v1"
                       value={llmCfg.baseUrl}
@@ -1499,7 +1499,7 @@ export function SettingsRunPanel() {
                     />
                   </div>
                   <div>
-                    <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Model</Label>
+                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">Model</Label>
                     <Input
                       placeholder="claude-sonnet-4-20250514 / gpt-4o-mini"
                       value={llmCfg.model}
@@ -1508,7 +1508,7 @@ export function SettingsRunPanel() {
                     />
                   </div>
                   <div>
-                    <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">System</Label>
+                    <Label className="text-xs uppercase tracking-wider text-muted-foreground">System</Label>
                     <Input
                       placeholder="(可选) 系统提示"
                       value={llmCfg.system}
@@ -1518,51 +1518,52 @@ export function SettingsRunPanel() {
                   </div>
                 </div>
               </motion.div>
-            )
-                {/* ── Database config ──────────────────────────────────────── */}
-                <div className="mt-4 border-t border-border/40 pt-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-1.5">
-                      <Database className="h-3.5 w-3.5 text-muted-foreground" />
-                      <span className="text-[11px] font-medium text-foreground">数据库</span>
-                    </div>
-                    <Badge variant="outline" className="text-[9px] px-1 py-0 h-4 border-amber-500/30 text-amber-600 bg-amber-500/10 gap-0.5">
-                      <RefreshCw className="h-2 w-2" /> 重启生效
-                    </Badge>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      value={dbPath}
-                      onChange={e => setDbPath(e.target.value)}
-                      placeholder="file:./db/custom.db"
-                      className="h-8 text-xs font-mono flex-1"
-                    />
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs shrink-0"
-                      onClick={saveDbPath}
-                      disabled={dbPathSaving}
-                    >
-                      {dbPathSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                      <span className="ml-1">保存</span>
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 text-xs shrink-0"
-                      onClick={loadDbPath}
-                    >
-                      <RefreshCw className="h-3 w-3" />
-                    </Button>
-                  </div>
-                  {dbPathStatus && (
-                    <div className={`mt-1 text-[10px] ${dbPathStatus.startsWith('✓') ? 'text-emerald-600' : 'text-rose-500'}`}>
-                      {dbPathStatus}
-                    </div>
-                  )}
-                </div>}
+            )}
           </AnimatePresence>
+
+          {/* ── Database config (always visible) ──────────────────────── */}
+          <div className="mt-4 border-t border-border/40 pt-4">
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1.5">
+                <Database className="h-3.5 w-3.5 text-muted-foreground" />
+                <span className="text-sm font-medium text-foreground">数据库</span>
+              </div>
+              <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-amber-500/30 text-amber-600 bg-amber-500/10 gap-0.5">
+                <RefreshCw className="h-2 w-2" /> 重启生效
+              </Badge>
+            </div>
+            <div className="flex items-center gap-2">
+              <Input
+                value={dbPath}
+                onChange={e => setDbPath(e.target.value)}
+                placeholder="file:./db/custom.db"
+                className="h-8 text-xs font-mono flex-1"
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 text-xs shrink-0"
+                onClick={saveDbPath}
+                disabled={dbPathSaving}
+              >
+                {dbPathSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                <span className="ml-1">保存</span>
+              </Button>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 text-xs shrink-0"
+                onClick={loadDbPath}
+              >
+                <RefreshCw className="h-3 w-3" />
+              </Button>
+            </div>
+            {dbPathStatus && (
+              <div className={`mt-1 text-xs ${dbPathStatus.startsWith('✓') ? 'text-emerald-600' : 'text-rose-500'}`}>
+                {dbPathStatus}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ── Tabbed module panels ─────────────────────────────────────── */}
@@ -1656,7 +1657,7 @@ export function SettingsRunPanel() {
 
                 {litExistingReports.length > 0 && (
                   <div className="mt-3 pt-3 border-t border-border/40">
-                    <div className="text-[10px] uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
+                    <div className="text-xs uppercase tracking-wider text-muted-foreground mb-1.5 flex items-center gap-1.5">
                       <FileText className="h-3 w-3" /> 历史报告 ({litExistingReports.length} 天)
                     </div>
                     <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
@@ -1665,7 +1666,7 @@ export function SettingsRunPanel() {
                           key={r.date}
                           type="button"
                           onClick={() => setLitDate(r.date)}
-                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] border border-border/60 hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors"
+                          className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs border border-border/60 hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors"
                           title={`${r.date} — ${r.paperCount} 篇${r.hasLLMDigest ? ' (有 LLM 摘要)' : ''}`}
                         >
                           <span className="font-mono">{r.date.slice(5)}</span>
@@ -1758,7 +1759,7 @@ export function SettingsRunPanel() {
                     写入 LLM-Wiki 文件
                   </label>
                   {evalGenerateReport && (
-                    <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/60 gap-1">
+                    <Badge variant="outline" className="text-xs font-normal text-muted-foreground border-border/60 gap-1">
                       <Zap className="h-2.5 w-2.5 text-amber-500" />
                       默认原子任务 (评估 + 报告 ~50s)
                     </Badge>
@@ -1787,7 +1788,7 @@ export function SettingsRunPanel() {
                 </div>
 
                 {weeklyDbCounts && (
-                  <div className="mb-3 flex items-center gap-2 flex-wrap text-[10px] text-muted-foreground">
+                  <div className="mb-3 flex items-center gap-2 flex-wrap text-xs text-muted-foreground">
                     <Database className="h-3 w-3" />
                     <span>DB 中本周已有：</span>
                     <code className="px-1.5 py-0.5 rounded bg-muted/60 font-mono">PdbStructure {weeklyDbCounts.pdbStructure}</code>
@@ -1804,7 +1805,7 @@ export function SettingsRunPanel() {
                         key={c}
                         type="button"
                         onClick={() => setWeeklyCycles(c)}
-                        className={`h-7 px-2 rounded-md text-[11px] border transition-all ${
+                        className={`h-7 px-2 rounded-md text-sm border transition-all ${
                           weeklyCycles === c
                             ? 'border-primary/50 bg-primary/10 text-foreground font-medium'
                             : 'border-border/60 text-muted-foreground hover:text-foreground hover:border-border'
@@ -1826,7 +1827,7 @@ export function SettingsRunPanel() {
                     label={isRunning('weekly') ? '运行中…' : '立即触发'}
                   />
 
-                  <span className="text-[10px] text-muted-foreground ml-auto flex items-center gap-1">
+                  <span className="text-xs text-muted-foreground ml-auto flex items-center gap-1">
                     <Cpu className="h-3 w-3" />
                     LLM → <code className="px-1 py-0.5 rounded bg-muted/60 font-mono">{effectiveProviderId || 'auto'}</code>
                   </span>
@@ -1867,7 +1868,7 @@ export function SettingsRunPanel() {
                     <div className="flex items-center gap-2">
                       <Activity className="h-3.5 w-3.5 text-muted-foreground" />
                       <span className="text-xs font-semibold">执行日志</span>
-                      <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground border-border/60">
+                      <Badge variant="outline" className="text-xs font-normal text-muted-foreground border-border/60">
                         {logFilter === 'all' ? logs.length : logs.filter(l => l.module === logFilter).length}
                       </Badge>
                     </div>
@@ -1884,7 +1885,7 @@ export function SettingsRunPanel() {
                             key={f.k}
                             type="button"
                             onClick={() => setLogFilter(f.k)}
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-medium transition-colors ${
+                            className={`px-1.5 py-0.5 rounded text-xs font-medium transition-colors ${
                               logFilter === f.k ? 'bg-primary/10 text-foreground' : 'text-muted-foreground hover:text-foreground'
                             }`}
                             title={f.k === 'all' ? '全部' : f.k === 'literature' ? '文献' : f.k === 'eval' ? '评估' : '周报'}
@@ -1901,7 +1902,7 @@ export function SettingsRunPanel() {
                           value={logSearch}
                           onChange={e => setLogSearch(e.target.value)}
                           placeholder="搜索…"
-                          className="w-16 bg-transparent text-[10px] outline-none placeholder:text-muted-foreground/50"
+                          className="w-16 bg-transparent text-xs outline-none placeholder:text-muted-foreground/50"
                         />
                       </div>
                       <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => exportLogs('md')} title="导出 Markdown" disabled={logs.length === 0}>
@@ -1910,7 +1911,7 @@ export function SettingsRunPanel() {
                       <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => exportLogs('json')} title="导出 JSON" disabled={logs.length === 0}>
                         <Download className="h-3 w-3" />
                       </Button>
-                      <Button variant="ghost" size="sm" className="h-6 text-[10px] text-muted-foreground px-2" onClick={() => setLogs([])}>
+                      <Button variant="ghost" size="sm" className="h-6 text-xs text-muted-foreground px-2" onClick={() => setLogs([])}>
                         清空
                       </Button>
                     </div>
@@ -1938,13 +1939,13 @@ export function SettingsRunPanel() {
                                 {l.status === 'success' && <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />}
                                 {l.status === 'error' && <XCircle className="h-3 w-3 text-rose-500 shrink-0" />}
                                 {l.status === 'running' && <Loader2 className="h-3 w-3 animate-spin text-sky-500 shrink-0" />}
-                                <span className="text-muted-foreground font-mono text-[10px] shrink-0">{l.ts.slice(11, 19)}</span>
-                                <Badge variant="outline" className={`text-[8px] px-1 py-0 h-3.5 shrink-0 ${moduleBadge.cls}`}>{moduleBadge.txt}</Badge>
+                                <span className="text-muted-foreground font-mono text-xs shrink-0">{l.ts.slice(11, 19)}</span>
+                                <Badge variant="outline" className={`text-3xs px-1 py-0 h-3.5 shrink-0 ${moduleBadge.cls}`}>{moduleBadge.txt}</Badge>
                                 <span className="font-medium flex-1 leading-tight">{l.summary}</span>
-                                {l.durationMs != null && <span className="text-muted-foreground text-[10px] shrink-0">{Math.round(l.durationMs / 100) / 10}s</span>}
+                                {l.durationMs != null && <span className="text-muted-foreground text-xs shrink-0">{Math.round(l.durationMs / 100) / 10}s</span>}
                               </div>
                               {l.details && (
-                                <pre className="mt-1 text-[10px] whitespace-pre-wrap text-muted-foreground max-h-32 overflow-y-auto font-mono leading-relaxed">
+                                <pre className="mt-1 text-xs whitespace-pre-wrap text-muted-foreground max-h-32 overflow-y-auto font-mono leading-relaxed">
                                   {l.details}
                                 </pre>
                               )}
@@ -1952,7 +1953,7 @@ export function SettingsRunPanel() {
                           );
                         })}
                       {logs.filter(l => logFilter === 'all' || l.module === logFilter).filter(l => !logSearch || l.summary.toLowerCase().includes(logSearch.toLowerCase()) || (l.details || '').toLowerCase().includes(logSearch.toLowerCase())).length === 0 && (
-                        <div className="text-[10px] text-muted-foreground/60 text-center py-3">无匹配日志</div>
+                        <div className="text-xs text-muted-foreground/60 text-center py-3">无匹配日志</div>
                       )}
                     </div>
                   </ScrollArea>
@@ -1968,11 +1969,11 @@ export function SettingsRunPanel() {
             href="https://hermes-agent.nousresearch.com/docs"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
+            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
           >
             <ExternalLink className="h-3 w-3" /> Hermes docs
           </a>
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground/60">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground/60">
             <ShieldCheck className="h-3 w-3" />
             <span>SSE 实时流式 · 并行执行 · 自动 provider 检测 · Hermes CLI 优先</span>
           </div>
@@ -2040,7 +2041,7 @@ function ModuleCard({
                 {title}
               </h3>
             </div>
-            <code className="text-[10px] text-muted-foreground font-mono">{endpoint}</code>
+            <code className="text-xs text-muted-foreground font-mono">{endpoint}</code>
           </div>
         </div>
         <p className="text-xs text-muted-foreground leading-relaxed mb-3">{description}</p>
@@ -2058,7 +2059,7 @@ function ModuleCard({
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">{label}</Label>
+      <Label className="text-xs uppercase tracking-wider text-muted-foreground">{label}</Label>
       <div className="mt-1">{children}</div>
     </div>
   );
@@ -2067,7 +2068,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function InfoTile({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
   return (
     <div>
-      <Label className="text-[10px] uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+      <Label className="text-xs uppercase tracking-wider text-muted-foreground flex items-center gap-1">
         {icon}{label}
       </Label>
       <div className="mt-1 h-8 px-2 rounded-md border border-border/60 bg-muted/30 flex items-center font-mono text-xs text-foreground/80 truncate">
@@ -2125,7 +2126,7 @@ function ToggleChip({
   return (
     <label className={`flex items-center gap-1.5 text-xs text-muted-foreground pb-1.5 ${disabled ? 'opacity-40 pointer-events-none' : 'cursor-pointer'}`}>
       <Switch checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} className="scale-90" />
-      <span className="font-mono text-[11px]">{label}</span>
+      <span className="font-mono text-sm">{label}</span>
     </label>
   );
 }
