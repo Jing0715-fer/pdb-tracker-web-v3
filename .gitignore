@@ -96,3 +96,6 @@ blob-report/
 # Local SQLite overrides (the repo ships db/custom.db for demos but local edits are noise)
 *.local.db
 *.local.db-journal
+
+# Lint temp output
+.lint-tmp.json

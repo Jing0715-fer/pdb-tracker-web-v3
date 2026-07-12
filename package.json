@@ -6,7 +6,7 @@
     "dev": "NODE_OPTIONS=\"--max-old-space-size=4096\" next dev --webpack -p 3000 2>&1 | tee dev.log",
     "build": "next build --webpack",
     "start": "NODE_ENV=production node -r dotenv/config .next/standalone/server.js",
-    "lint": "eslint .",
+    "lint": "node scripts/lint.mjs",
     "db:push": "prisma db push",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
