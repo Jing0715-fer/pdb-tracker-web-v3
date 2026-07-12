@@ -19,7 +19,7 @@
  *   stderr. Adding a new CLI = adding one entry to `CLI_ADAPTERS`.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -379,8 +379,7 @@ const CLI_ADAPTERS: CliAdapter[] = [
 function wslRegistryInfo(): { defaultDistro: string; distros: string[] } | null {
   if (process.platform !== 'win32') return null;
   try {
-    // Use dynamic require so we don't crash Node on non-Windows builds.
-    const { execSync } = require('node:child_process') as typeof import('node:child_process');
+    // execSync imported at top of file; safe since we already gated on `process.platform === 'win32'`.
     // `reg query` enumerates distros; use ASCII codepage to avoid UTF-8 decode errors.
     const out = execSync('reg query "HKCU\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Lxss" /s', {
       timeout: 5_000,

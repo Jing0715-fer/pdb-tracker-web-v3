@@ -1,8 +1,11 @@
 import { PrismaClient } from '@prisma/client'
+import { existsSync, readFileSync } from 'node:fs'
+import { isAbsolute, resolve } from 'node:path'
 
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined
 }
+
 
 /**
  * Resolve the database URL on EVERY instantiation so that:
@@ -18,19 +21,18 @@ function resolveDbUrl(): string {
   //    do not accept async callbacks; for dynamic paths we'd have to
   //    reload the client. So we resolve synchronously via a small cache.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fs = require('node:fs') as typeof import('node:fs');
-    const path = require('node:path') as typeof import('node:path');
-    const cfgPath = path.resolve(process.cwd(), '.hermes', 'db-config.json');
-    if (fs.existsSync(cfgPath)) {
+    
+    
+    const cfgPath = resolve(process.cwd(), '.hermes', 'db-config.json');
+    if (existsSync(cfgPath)) {
       try {
-        const raw = fs.readFileSync(cfgPath, 'utf-8');
+        const raw = readFileSync(cfgPath, 'utf-8');
         const cfg = JSON.parse(raw);
         if (cfg && typeof cfg.dbPath === 'string' && cfg.dbPath.length > 0) {
           const trimmed = cfg.dbPath.replace(/^file:/, '');
           // Convert relative paths to absolute (anchored at project root)
-          if (!path.isAbsolute(trimmed)) {
-            return `file:${path.resolve(process.cwd(), trimmed)}`;
+          if (!isAbsolute(trimmed)) {
+            return `file:${resolve(process.cwd(), trimmed)}`;
           }
           return `file:${trimmed}`;
         }
@@ -47,9 +49,8 @@ function resolveDbUrl(): string {
   const rel = envUrl.replace(/^file:/, '');
   if (!rel) return envUrl;
   try {
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const path = require('node:path') as typeof import('node:path');
-    if (!path.isAbsolute(rel)) return `file:${path.resolve(process.cwd(), rel)}`;
+    
+    if (!isAbsolute(rel)) return `file:${resolve(process.cwd(), rel)}`;
     return envUrl;
   } catch {
     return envUrl;

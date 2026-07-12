@@ -519,8 +519,6 @@ function LLMPreview({
   );
 }
 
-
-
 /**
  * RunHistoryPanel — a slim strip at the top of each module showing the most
  * recent N runs for that module. Loads from `/api/skill-runs/history` with a
@@ -554,7 +552,11 @@ function RunHistoryPanel({
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    // Defer initial loading state to a microtask so it doesn't trigger
+    // the synchronous-setState-in-effect warning.
+    Promise.resolve().then(() => {
+      if (!cancelled) setLoading(true);
+    });
     fetch(`/api/skill-runs/history?module=${moduleKey}&limit=${limit}`)
       .then((r) => r.json())
       .then((d) => {
@@ -1033,7 +1035,6 @@ export function SettingsRunPanel() {
   useEffect(() => {
     if (!open) return;
     if (!llmInfo) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setScanning(true);
       fetch('/api/llm/providers')
         .then(r => r.json())
@@ -1199,7 +1200,6 @@ export function SettingsRunPanel() {
     const s = litStream.state;
     if (s.ok && s.result) {
       const d = s.result;
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       log({
         ts: new Date().toISOString(),
         module: 'literature',
@@ -1230,7 +1230,6 @@ export function SettingsRunPanel() {
             ? ` + 报告 ${d.report.savedToFile ? `已落盘 ${d.report.filename}` : '已生成'} (${d.report.provider}/${d.report.model}, ${Math.round((d.report.durationMs || 0) / 100) / 10}s)`
             : ` ⚠️ 报告生成失败: ${d.report.error}`)
         : ' (跳过报告)';
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       log({
         ts: new Date().toISOString(),
         module: 'eval',
@@ -1254,7 +1253,6 @@ export function SettingsRunPanel() {
       const summary = (latest.detail || latest.message || latest.stage || '').toString();
       if (summary && Date.now() - weeklyLogThrottle.current > 800) {
         weeklyLogThrottle.current = Date.now();
-        // eslint-disable-next-line react-hooks/set-state-in-effect
         log({ ts: new Date().toISOString(), module: 'weekly', status: 'running', summary });
       }
     }
@@ -1268,7 +1266,6 @@ export function SettingsRunPanel() {
       const r = s.result;
       const cycles = r.cycles || [];
       const providers = [...new Set(cycles.map((c: any) => c.provider).filter(Boolean))].join(', ');
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       log({
         ts: new Date().toISOString(),
         module: 'weekly',
