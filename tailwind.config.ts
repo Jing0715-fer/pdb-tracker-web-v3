@@ -11,8 +11,11 @@ const config: Config = {
   theme: {
   	extend: {
     fontSize: {
-      '3xs': ['0.4375rem', { lineHeight: '0.625rem' }],
-      '2xs': ['0.5rem', { lineHeight: '0.625rem' }],
+      // 5px / 6px — half the visual presence of 3xs (~50% smaller).
+      // Use only for tightly-packed metadata badges where every pixel counts.
+      '4xs': ['0.3125rem', { lineHeight: '0.4375rem' }],
+      '3xs': ['0.5rem', { lineHeight: '0.625rem' }],
+      '2xs': ['0.5625rem', { lineHeight: '0.6875rem' }],
     },
   		colors: {
   			background: 'hsl(var(--background))',

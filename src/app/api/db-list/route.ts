@@ -5,14 +5,19 @@
  * their absolute paths + display metadata so the DbSetupWizard can show them
  * in its "select existing database" step.
  *
+ * For each file we also probe the schema via a throwaway PrismaClient to read
+ * sqlite_master, so the wizard can show "X tables / not initialized" badges
+ * next to each entry.
+ *
  * Response:
  *   {
  *     databases: [
- *       { displayPath: 'db/custom.db', fsPath: 'D:\\AI-web-app\\db\\custom.db',
- *         sizeBytes: 12345, modifiedAt: '2026-07-12T...' }
+ *       { displayPath, fsPath, dbUrl, sizeBytes, mtime, isActive, hasSchema,
+ *         tableCount, source }
  *     ],
- *     scannedDir: 'D:\\AI-web-app\\db',
- *     totalFound: 1,
+ *     scannedDirs: string[],
+ *     totalFound: number,
+ *     activeDbPath: string | null,
  *   }
  */
 export const runtime = 'nodejs'
@@ -27,14 +32,13 @@ const MAX_DEPTH = 2
 
 async function scanDir(root: string, prefix: string, depth = 0): Promise<any[]> {
   if (depth > MAX_DEPTH) return []
-  let entries: any[] = []
+  const entries: any[] = []
   try {
     const items = await fs.readdir(root, { withFileTypes: true })
     for (const item of items) {
       const full = path.join(root, item.name)
       const rel = prefix ? `${prefix}/${item.name}` : item.name
       if (item.isDirectory()) {
-        // Skip noisy dirs.
         if (['node_modules', '.next', '.git', 'download', '.zscripts'].includes(item.name)) continue
         const nested = await scanDir(full, rel, depth + 1)
         entries.push(...nested)
@@ -44,14 +48,62 @@ async function scanDir(root: string, prefix: string, depth = 0): Promise<any[]> 
           entries.push({
             displayPath: rel,
             fsPath: full,
+            dbUrl: `file:${full}`,
             sizeBytes: stat.size,
-            modifiedAt: stat.mtime.toISOString(),
+            mtime: stat.mtime.toISOString(),
+            source: 'scan',
+            // Filled in below
+            isActive: false,
+            hasSchema: false,
+            tableCount: 0,
+            tables: [],
           })
         } catch { /* ignore */ }
       }
     }
   } catch { /* dir missing or unreadable */ }
   return entries
+}
+
+async function probeSchema(fileUrl: string): Promise<{ hasSchema: boolean | null; tableCount: number; tables: string[]; probeError?: string }> {
+  try {
+    const { PrismaClient } = await import('@prisma/client')
+    const probe = new PrismaClient({
+      datasources: { db: { url: fileUrl } },
+      log: ['error'],
+    })
+    try {
+      const rows = await probe.$queryRaw<{ name: string }[]>`
+        SELECT name FROM sqlite_master
+        WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_prisma%'
+        ORDER BY name
+      `
+      const tables = rows.map((r: any) => String(r.name))
+      const expected = ['PdbStructure', 'Evaluation', 'PubMedArticle', 'WeeklyReport', 'WeeklySnapshot', 'SkillRunRecord']
+      const hasSchema = expected.every((t) => tables.includes(t))
+      return { hasSchema, tableCount: tables.length, tables }
+    } finally {
+      await probe.$disconnect().catch(() => {})
+    }
+  } catch (err: any) {
+    // Distinguish "探测失败"(如文件被锁 / 引擎拒绝连接)from "真的空数据库"。
+    // 前端用 hasSchema=null 显示"探测失败, 请重试",避免被误读为"未初始化"。
+    return { hasSchema: null, tableCount: 0, tables: [], probeError: err?.message || String(err) }
+  }
+}
+
+async function getActiveDbPath(): Promise<string | null> {
+  try {
+    const cfgPath = path.resolve(process.cwd(), '.hermes', 'db-config.json')
+    const raw = await fs.readFile(cfgPath, 'utf-8')
+    const cfg = JSON.parse(raw)
+    const raw0 = (cfg?.dbPath || '').replace(/^file:/, '')
+    if (!raw0) return null
+    if (!path.isAbsolute(raw0)) return path.resolve(process.cwd(), raw0)
+    return raw0
+  } catch {
+    return null
+  }
 }
 
 export async function GET() {
@@ -71,11 +123,30 @@ export async function GET() {
     seen.add(e.fsPath)
     return true
   })
-  // Sort by modifiedAt desc (newest first).
-  unique.sort((a, b) => (b.modifiedAt || '').localeCompare(a.modifiedAt || ''))
+
+  const activeAbs = await getActiveDbPath()
+
+  // Probe schema for each (in parallel, with timeout).
+  await Promise.all(unique.map(async (entry) => {
+    if (activeAbs && entry.fsPath.toLowerCase() === activeAbs.toLowerCase()) {
+      entry.isActive = true
+    }
+    const schema = await probeSchema(entry.dbUrl)
+    entry.hasSchema = schema.hasSchema
+    entry.tableCount = schema.tableCount
+    entry.tables = schema.tables
+  }))
+
+  unique.sort((a, b) => {
+    if (a.isActive && !b.isActive) return -1
+    if (!a.isActive && b.isActive) return 1
+    return (b.mtime || '').localeCompare(a.mtime || '')
+  })
+
   return NextResponse.json({
     databases: unique,
     scannedDirs: scanned,
     totalFound: unique.length,
+    activeDbPath: activeAbs,
   })
 }

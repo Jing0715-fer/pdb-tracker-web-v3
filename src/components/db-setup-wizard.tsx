@@ -72,8 +72,18 @@ interface DbListEntry {
   sizeBytes: number
   mtime: string
   isActive: boolean
-  hasSchema: boolean
+  /**
+   * tri-state:
+   *   true  — 探测成功 + 已包含全部 PDB Tracker 表
+   *   false — 探测成功 + 真的未初始化（空 SQLite 文件）
+   *   null  — 探测失败（如 dev server 在持有 db 锁、Prisma 引擎冲突等），与「未初始化」不同
+   *           前端展示「探测失败」徽章并提示重试，避免误以为空文件。
+   */
+  hasSchema: boolean | null
   tableCount: number
+  /** 当 hasSchema=null 时存了失败原因，便于诊断。 */
+  probeError?: string
+  tables?: string[]
   source: string
 }
 
@@ -262,13 +272,13 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o && allowSkip && onClose) onClose() }}>
-      <DialogContent className="max-w-2xl w-[92vw] !max-w-2xl p-0 overflow-hidden gap-0" style={{ marginTop: "2rem" }}>
-        <DialogHeader className="px-6 pt-8 pb-4 border-b border-border/50">
-          <DialogTitle className="flex items-center gap-2 text-base">
+      <DialogContent className="max-w-2xl w-[92vw] !max-w-2xl p-0 overflow-hidden gap-0" style={{ marginTop: "4rem", marginBottom: "2rem" }}>
+        <DialogHeader className="px-6 pt-3 pb-5 border-b border-border/50">
+          <DialogTitle className="flex items-center gap-2 text-base leading-none">
             <Database className="h-4 w-4 text-amber-500" />
             数据库初始化设置
           </DialogTitle>
-          <DialogDescription className="text-xs text-muted-foreground mt-1">
+          <DialogDescription className="text-xs text-muted-foreground mt-2.5 leading-relaxed">
             首次使用前，请创建一个新的数据库文件，或选择一个已有数据库。运行中心与 ① 文献 / ② 评估 / ③ 周报三大模块将共用此数据库。
           </DialogDescription>
         </DialogHeader>
@@ -430,44 +440,61 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
                 ) : (
                   <ScrollArea className="h-[280px] rounded-md border border-border/40">
                     <div className="divide-y divide-border/30">
-                      {filteredDbList.map((db) => (
-                        <button
-                          key={db.fsPath}
-                          onClick={() => setSelectedDbUrl(db.dbUrl)}
-                          className={`w-full text-left px-3 py-2.5 transition-colors flex items-start gap-2.5 ${
-                            selectedDbUrl === db.dbUrl
-                              ? 'bg-claude-accent/10 border-l-2 border-l-claude-accent'
-                              : 'hover:bg-muted/40 border-l-2 border-l-transparent'
-                          }`}
-                        >
-                          <HardDrive className={`h-4 w-4 mt-0.5 shrink-0 ${db.isActive ? 'text-emerald-500' : 'text-muted-foreground'}`} />
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              <code className="text-[11px] font-mono text-foreground break-all">{db.displayPath}</code>
-                              {db.isActive && (
-                                <Badge variant="outline" className="text-3xs px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 bg-emerald-500/10 gap-0.5 shrink-0">
-                                  <CheckCircle2 className="h-2.5 w-2.5" /> 当前
-                                </Badge>
-                              )}
-                              {db.hasSchema ? (
-                                <Badge variant="outline" className="text-3xs px-1 py-0 h-4 border-sky-500/30 text-sky-600 bg-sky-500/10 gap-0.5 shrink-0">
-                                  {db.tableCount} 表
-                                </Badge>
-                              ) : (
-                                <Badge variant="outline" className="text-3xs px-1 py-0 h-4 border-amber-500/30 text-amber-600 bg-amber-500/10 gap-0.5 shrink-0">
-                                  未初始化
-                                </Badge>
-                              )}
-                            </div>
-                            <div className="text-3xs text-muted-foreground mt-0.5 flex items-center gap-2">
-                              <span>{formatSize(db.sizeBytes)}</span>
-                              <span>·</span>
-                              <span>{new Date(db.mtime).toLocaleDateString('zh-CN')} {new Date(db.mtime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
-                            </div>
-                          </div>
-                        </button>
-                      ))}
-                    </div>
+                      {filteredDbList.map((db) => {
+                                              const isSel = selectedDbUrl === db.dbUrl
+                                              return (
+                                                <button
+                                                  key={`${db.fsPath}#${db.dbUrl}`}
+                                                  type="button"
+                                                  aria-pressed={isSel}
+                                                  onClick={() => setSelectedDbUrl(isSel ? null : db.dbUrl)}
+                                                  className={`w-full text-left px-3 py-2.5 transition-colors flex items-start gap-2.5 ${
+                                                    isSel
+                                                      ? 'bg-sky-500/15 ring-2 ring-sky-500 border-l-[3px] border-l-sky-500'
+                                                      : 'hover:bg-muted/40 border-l-[3px] border-l-transparent'
+                                                  }`}
+                                                >
+                                                  <HardDrive className={`h-4 w-4 mt-0.5 shrink-0 ${db.isActive ? 'text-emerald-500' : isSel ? 'text-sky-500' : 'text-muted-foreground'}`} />
+                                                  <div className="flex-1 min-w-0">
+                                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                                      <code className="text-[11px] font-mono text-foreground break-all">{db.displayPath}</code>
+                                                      {db.isActive && (
+                                                        <Badge variant="outline" className="text-4xs px-1 py-0 h-3.5 border-emerald-500/40 text-emerald-600 bg-emerald-500/10 gap-0.5 shrink-0">
+                                                          <CheckCircle2 className="h-2.5 w-2.5" /> 当前
+                                                        </Badge>
+                                                      )}
+                                                      {db.hasSchema === true && (
+                                                        <Badge variant="outline" className="text-4xs px-1 py-0 h-3.5 border-sky-500/30 text-sky-600 bg-sky-500/10 gap-0.5 shrink-0">
+                                                          {db.tableCount} 表
+                                                        </Badge>
+                                                      )}
+                                                      {db.hasSchema === false && (
+                                                        <Badge variant="outline" className="text-4xs px-1 py-0 h-3.5 border-amber-500/30 text-amber-600 bg-amber-500/10 gap-0.5 shrink-0">
+                                                          未初始化
+                                                        </Badge>
+                                                      )}
+                                                      {db.hasSchema === null && (
+                                                        <Badge variant="outline" className="text-4xs px-1 py-0 h-3.5 border-rose-500/30 text-rose-600 bg-rose-500/10 gap-0.5 shrink-0" title={db.probeError || '探测失败，请点击刷新按钮重试'}>
+                                                          探测失败
+                                                        </Badge>
+                                                      )}
+                                                    </div>
+                                                    <div className="text-3xs text-muted-foreground mt-0.5 flex items-center gap-2">
+                                                      <span>{formatSize(db.sizeBytes)}</span>
+                                                      <span>·</span>
+                                                      <span>{new Date(db.mtime).toLocaleDateString('zh-CN')} {new Date(db.mtime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
+                                                    </div>
+                                                  </div>
+                                                  {/* Radio indicator on the right */}
+                                                  <div className={`mt-1 h-4 w-4 rounded-full border-2 shrink-0 flex items-center justify-center ${
+                                                    isSel ? 'border-emerald-500 bg-emerald-500/10' : 'border-muted-foreground/30'
+                                                  }`}>
+                                                    {isSel && <div className="h-2 w-2 rounded-full bg-emerald-500" />}
+                                                  </div>
+                                                </button>
+                                              )
+                                            })}
+                                             </div>
                   </ScrollArea>
                 )}
 
@@ -538,14 +565,14 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
                       {resultStatus.activeFsPath}
                     </div>
                     <div className="flex flex-wrap gap-1.5 mt-2">
-                      <Badge variant="outline" className="text-3xs h-5 border-emerald-500/30 text-emerald-700 bg-emerald-500/10">
+                      <Badge variant="outline" className="text-4xs h-4 border-emerald-500/30 text-emerald-700 bg-emerald-500/10">
                         <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" /> 表结构已初始化
                       </Badge>
-                      <Badge variant="outline" className="text-3xs h-5">
+                      <Badge variant="outline" className="text-4xs h-4">
                         {resultStatus.tableCount} 表
                       </Badge>
                       {!resultStatus.isTest && (
-                        <Badge variant="outline" className="text-3xs h-5 border-sky-500/30 text-sky-700 bg-sky-500/10">
+                        <Badge variant="outline" className="text-4xs h-4 border-sky-500/30 text-sky-700 bg-sky-500/10">
                           <ShieldCheck className="h-2.5 w-2.5 mr-0.5" /> 正式数据库
                         </Badge>
                       )}
