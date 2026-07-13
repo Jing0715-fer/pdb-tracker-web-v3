@@ -378,7 +378,12 @@ const CLI_ADAPTERS: CliAdapter[] = [
      *  `--print "<prompt>"` emits a single text reply on stdout and exits.
      *  For streaming, append `--output-format stream-json` (NDJSON events).
      *  For interactive TUI/REPL, omit `--print`. */
-    callArgs: (q) => ['--print', q],
+    callArgs: (q, model) => {
+      // Default to deepseek-v4-pro for WorkBuddy CLI; user can override via the
+      // LLM 高级配置 → model field in the Run Center.
+      const m = model || process.env.CODEBUDDY_MODEL || 'deepseek-v4-pro';
+      return ['--print', '--model', m, q];
+    },
     outputStream: 'stdout',
     probeTimeoutMs: 15_000,
     callTimeoutMs: 240_000,
