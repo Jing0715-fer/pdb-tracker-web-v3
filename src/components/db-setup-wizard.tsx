@@ -288,7 +288,7 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
                   <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0 mt-0.5" />
                   <div className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
                     <div className="font-semibold mb-0.5">当前数据库仅供测试</div>
-                    默认的 <code className="font-mono text-[10px] bg-amber-500/10 px-1 rounded">db/custom.db</code> 是测试数据库，请勿用于真实数据。建议创建一个新数据库用于日常工作。
+                    默认的 <code className="font-mono text-3xs bg-amber-500/10 px-1 rounded">db/custom.db</code> 是测试数据库，请勿用于真实数据。建议创建一个新数据库用于日常工作。
                   </div>
                 </div>
 
@@ -351,7 +351,7 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
                     placeholder="db"
                     className="h-9 text-xs font-mono mt-1"
                   />
-                  <p className="text-[10px] text-muted-foreground mt-1">默认放在项目 <code>db/</code> 目录下。</p>
+                  <p className="text-3xs text-muted-foreground mt-1">默认放在项目 <code>db/</code> 目录下。</p>
                 </div>
                 <div>
                   <Label className="text-xs uppercase tracking-wider text-muted-foreground">数据库文件名</Label>
@@ -361,7 +361,7 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
                     placeholder="my-pdb-tracker.db"
                     className="h-9 text-xs font-mono mt-1"
                   />
-                  <p className="text-[10px] text-muted-foreground mt-1">将以 <code>.db</code> 后缀创建 SQLite 文件。</p>
+                  <p className="text-3xs text-muted-foreground mt-1">将以 <code>.db</code> 后缀创建 SQLite 文件。</p>
                 </div>
                 <div className="rounded-md bg-muted/40 p-3 text-xs">
                   <div className="text-muted-foreground mb-1">最终路径：</div>
@@ -423,7 +423,7 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
                     <p className="mt-1.5 text-xs text-muted-foreground">
                       {dbListSearch ? '未找到匹配的数据库' : '未找到已有数据库文件'}
                     </p>
-                    <p className="text-[10px] text-muted-foreground/70 mt-1">
+                    <p className="text-3xs text-muted-foreground/70 mt-1">
                       可在下方手动输入路径，或返回上一步创建新数据库
                     </p>
                   </div>
@@ -445,21 +445,21 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
                             <div className="flex items-center gap-1.5 flex-wrap">
                               <code className="text-[11px] font-mono text-foreground break-all">{db.displayPath}</code>
                               {db.isActive && (
-                                <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 bg-emerald-500/10 gap-0.5 shrink-0">
+                                <Badge variant="outline" className="text-3xs px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 bg-emerald-500/10 gap-0.5 shrink-0">
                                   <CheckCircle2 className="h-2.5 w-2.5" /> 当前
                                 </Badge>
                               )}
                               {db.hasSchema ? (
-                                <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-sky-500/30 text-sky-600 bg-sky-500/10 gap-0.5 shrink-0">
+                                <Badge variant="outline" className="text-3xs px-1 py-0 h-4 border-sky-500/30 text-sky-600 bg-sky-500/10 gap-0.5 shrink-0">
                                   {db.tableCount} 表
                                 </Badge>
                               ) : (
-                                <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-amber-500/30 text-amber-600 bg-amber-500/10 gap-0.5 shrink-0">
+                                <Badge variant="outline" className="text-3xs px-1 py-0 h-4 border-amber-500/30 text-amber-600 bg-amber-500/10 gap-0.5 shrink-0">
                                   未初始化
                                 </Badge>
                               )}
                             </div>
-                            <div className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-2">
+                            <div className="text-3xs text-muted-foreground mt-0.5 flex items-center gap-2">
                               <span>{formatSize(db.sizeBytes)}</span>
                               <span>·</span>
                               <span>{new Date(db.mtime).toLocaleDateString('zh-CN')} {new Date(db.mtime).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })}</span>
@@ -488,7 +488,7 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
 
                 <div className="rounded-md bg-sky-500/5 border border-sky-500/20 p-3 text-xs text-sky-700 dark:text-sky-300">
                   <ShieldCheck className="h-3.5 w-3.5 inline mr-1" />
-                  若该文件缺少 PDB Tracker 所需的表结构，会自动运行 <code className="font-mono text-[10px]">prisma db push</code> 补全，不会清空已有数据。
+                  若该文件缺少 PDB Tracker 所需的表结构，会自动运行 <code className="font-mono text-3xs">prisma db push</code> 补全，不会清空已有数据。
                 </div>
                 <div className="flex justify-between gap-2 pt-2">
                   <Button variant="ghost" size="sm" className="text-xs h-8" onClick={() => setMode('choose')}>
@@ -538,14 +538,14 @@ export function DbSetupWizard({ open, onComplete, onClose, allowSkip }: DbSetupW
                       {resultStatus.activeFsPath}
                     </div>
                     <div className="flex flex-wrap gap-1.5 mt-2">
-                      <Badge variant="outline" className="text-[10px] h-5 border-emerald-500/30 text-emerald-700 bg-emerald-500/10">
+                      <Badge variant="outline" className="text-3xs h-5 border-emerald-500/30 text-emerald-700 bg-emerald-500/10">
                         <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" /> 表结构已初始化
                       </Badge>
-                      <Badge variant="outline" className="text-[10px] h-5">
+                      <Badge variant="outline" className="text-3xs h-5">
                         {resultStatus.tableCount} 表
                       </Badge>
                       {!resultStatus.isTest && (
-                        <Badge variant="outline" className="text-[10px] h-5 border-sky-500/30 text-sky-700 bg-sky-500/10">
+                        <Badge variant="outline" className="text-3xs h-5 border-sky-500/30 text-sky-700 bg-sky-500/10">
                           <ShieldCheck className="h-2.5 w-2.5 mr-0.5" /> 正式数据库
                         </Badge>
                       )}

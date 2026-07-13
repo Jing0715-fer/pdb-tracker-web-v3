@@ -179,7 +179,7 @@ function StatusPill({ running, done, ok }: { running: boolean; done: boolean; ok
   if (running) {
     return (
       <Badge variant="outline" className="bg-sky-500/10 text-sky-600 dark:text-sky-300 border-sky-500/30 gap-1">
-        <Loader2 className="h-3 w-3 animate-spin" /> streaming
+        <Loader2 className="h-2.5 w-2.5 animate-spin" /> streaming
       </Badge>
     );
   }
@@ -263,7 +263,7 @@ function StreamFeed({
           <button
             type="button"
             onClick={() => setAutoScroll(a => !a)}
-            className={`text-2xs px-1.5 py-0.5 rounded border transition-colors ${autoScroll ? 'border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10' : 'border-border/60 text-muted-foreground hover:text-foreground'}`}
+            className={`text-3xs px-0.5 py-0 rounded border transition-colors ${autoScroll ? 'border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10' : 'border-border/60 text-muted-foreground hover:text-foreground'}`}
             title={autoScroll ? '自动滚动中，点击暂停' : '已暂停，点击恢复'}
           >
             {autoScroll ? '⤓ auto' : '⏸ paused'}
@@ -276,7 +276,7 @@ function StreamFeed({
       {typeof lastProgress === 'number' && (
         <div className="px-3 pt-2.5 pb-1.5">
           <div className="flex items-center justify-between mb-1">
-            <span className="text-2xs font-mono text-muted-foreground tabular-nums">
+            <span className="text-3xs font-mono text-muted-foreground tabular-nums">
               {lastProgress < 100 ? 'processing' : 'complete'} · {lastProgress}%
             </span>
             {done && (
@@ -361,7 +361,7 @@ function StageTimeline({ events }: { events: StreamEvent[] }) {
             <div key={stage} className="flex items-center shrink-0">
               <div className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-background/60 border border-border/40">
                 <span className={`h-1.5 w-1.5 rounded-full ${dotColor} ${isLast && !info.level ? 'animate-pulse' : ''}`} />
-                <span className="text-2xs font-mono text-muted-foreground whitespace-nowrap">{stage}</span>
+                <span className="text-3xs font-mono text-muted-foreground whitespace-nowrap">{stage}</span>
                 {info.count > 1 && <span className="text-3xs text-muted-foreground/50">×{info.count}</span>}
               </div>
               {!isLast && <span className="text-muted-foreground/30 mx-0.5">→</span>}
@@ -449,33 +449,33 @@ function LLMPreview({
           <span className="text-xs font-semibold truncate">{title}</span>
           {/* LLM status badge — clearly shows real success vs failure */}
           {ok === true && (
-            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 gap-0.5 shrink-0">
-              <CheckCircle2 className="h-2.5 w-2.5" /> LLM 真实生成
+            <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-emerald-500/40 text-emerald-600 dark:text-emerald-300 bg-emerald-500/10 gap-0.5 shrink-0">
+              <CheckCircle2 className="h-2 w-2" /> LLM 真实生成
             </Badge>
           )}
           {isFailure && (
-            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
-              <XCircle className="h-2.5 w-2.5" /> LLM 调用失败
+            <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
+              <XCircle className="h-2 w-2" /> LLM 调用失败
             </Badge>
           )}
           {/* DB persistence badge */}
           {dbSaved === true && (
-            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10 gap-0.5 shrink-0">
+            <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-sky-500/40 text-sky-600 dark:text-sky-300 bg-sky-500/10 gap-0.5 shrink-0">
               <Database className="h-2.5 w-2.5" /> 已入库
             </Badge>
           )}
           {dbSaved === false && (
-            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
+            <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-rose-500/40 text-rose-600 dark:text-rose-300 bg-rose-500/10 gap-0.5 shrink-0">
               <Database className="h-2.5 w-2.5" /> 入库失败
             </Badge>
           )}
           {!isFailure && (
-            <Badge variant="outline" className={`text-2xs px-1 py-0 h-4 ${a.badge} gap-0.5 shrink-0`}>
-              <Sparkles className="h-2.5 w-2.5" /> {provider}/{model}
+            <Badge variant="outline" className={`text-3xs px-1 py-0 h-3.5.5 ${a.badge} gap-0.5 shrink-0`}>
+              <Sparkles className="h-2 w-2" /> {provider}/{model}
             </Badge>
           )}
-          {chars != null && <span className="text-2xs text-muted-foreground/60 font-mono shrink-0">{chars} chars</span>}
-          {durationMs != null && <span className="text-2xs text-muted-foreground/60 font-mono shrink-0 hidden sm:inline">{(durationMs / 1000).toFixed(1)}s</span>}
+          {chars != null && <span className="text-3xs text-muted-foreground/60 font-mono shrink-0">{chars} chars</span>}
+          {durationMs != null && <span className="text-3xs text-muted-foreground/60 font-mono shrink-0 hidden sm:inline">{(durationMs / 1000).toFixed(1)}s</span>}
         </button>
         <div className="flex items-center gap-1 shrink-0">
           <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={copy} title="复制原文">
@@ -576,7 +576,7 @@ function RunHistoryPanel({
   if (loading) {
     return (
       <div className="px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground/60 border-t border-border/40 bg-background/30">
-        <Loader2 className="h-3 w-3 animate-spin" />
+        <Loader2 className="h-2.5 w-2.5 animate-spin" />
         加载运行历史…
       </div>
     );
@@ -618,20 +618,20 @@ function RunHistoryPanel({
                 className="w-full px-2 py-1 flex items-center gap-2 text-left hover:bg-background/60 transition-colors"
               >
                 {isOk ? (
-                  <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />
+                  <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500 shrink-0" />
                 ) : isErr ? (
                   <XCircle className="h-3 w-3 text-rose-500 shrink-0" />
                 ) : (
                   <AlertTriangle className="h-3 w-3 text-amber-500 shrink-0" />
                 )}
                 <span className="text-xs font-mono text-muted-foreground shrink-0">{fmtTime(r.createdAt)}</span>
-                <span className="text-sm truncate flex-1" title={r.summary}>{r.summary}</span>
+                <span className="text-xs truncate flex-1" title={r.summary}>{r.summary}</span>
                 {r.provider && (
-                  <span className="text-2xs font-mono text-muted-foreground/70 shrink-0 hidden sm:inline truncate max-w-[100px]" title={`${r.provider}/${r.model}`}>
+                  <span className="text-3xs font-mono text-muted-foreground/70 shrink-0 hidden sm:inline truncate max-w-[100px]" title={`${r.provider}/${r.model}`}>
                     {r.provider}/{r.model}
                   </span>
                 )}
-                <span className="text-2xs text-muted-foreground/60 font-mono shrink-0">{fmtDur(r.durationMs)}</span>
+                <span className="text-3xs text-muted-foreground/60 font-mono shrink-0">{fmtDur(r.durationMs)}</span>
                 <ChevronRight className={`h-3 w-3 text-muted-foreground/60 transition-transform shrink-0 ${isOpen ? 'rotate-90' : ''}`} />
               </button>
               <AnimatePresence initial={false}>
@@ -749,24 +749,24 @@ function ChapterStream({
     >
       <div className="flex items-center justify-between gap-2 px-3 py-2 border-b border-border/40 bg-background/40">
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <ChevronRight className="h-3.5 w-3.5 text-violet-500 shrink-0" />
-          <span className="text-xs font-semibold truncate">LLM 思考过程 · 分章流式</span>
-          <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-violet-500/30 text-violet-600 dark:text-violet-300 bg-violet-500/10 gap-0.5 shrink-0">
-            <Sparkles className="h-2.5 w-2.5" /> {completedCount}/{rows.length} 章节
+          <ChevronRight className="h-3 w-3 text-violet-500 shrink-0" />
+          <span className="text-3xs font-semibold truncate">LLM 思考过程 · 分章流式</span>
+          <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-violet-500/30 text-violet-600 dark:text-violet-300 bg-violet-500/10 gap-0.5 shrink-0">
+            <Sparkles className="h-2 w-2" /> {completedCount}/{rows.length} 章节
           </Badge>
           {okCount > 0 && failCount === 0 && (
-            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 shrink-0">
+            <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 shrink-0">
               ✓ 全部成功
             </Badge>
           )}
           {failCount > 0 && (
-            <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-rose-500/30 text-rose-600 bg-rose-500/10 shrink-0">
+            <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-rose-500/30 text-rose-600 bg-rose-500/10 shrink-0">
               ✗ {failCount} 失败
             </Badge>
           )}
           {running && completedCount < rows.length && (
-            <span className="text-xs text-violet-500 flex items-center gap-1 shrink-0">
-              <Loader2 className="h-3 w-3 animate-spin" />
+            <span className="text-3xs text-violet-500 flex items-center gap-1 shrink-0">
+              <Loader2 className="h-2.5 w-2.5 animate-spin" />
               生成中…
             </span>
           )}
@@ -792,11 +792,11 @@ function ChapterStream({
                   {r.index || '?'}/{r.total || '?'}
                 </span>
                 <span className="text-sm font-medium text-foreground/80 truncate">{r.label || r.key}</span>
-                {isRunning && <Loader2 className="h-3 w-3 animate-spin text-violet-500 shrink-0" />}
+                {isRunning && <Loader2 className="h-2.5 w-2.5 animate-spin text-violet-500 shrink-0" />}
                 {isError && <XCircle className="h-3 w-3 text-rose-500 shrink-0" />}
-                {!isRunning && !isError && <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />}
+                {!isRunning && !isError && <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500 shrink-0" />}
                 {r.durationMs != null && (
-                  <span className="text-2xs text-muted-foreground/60 font-mono ml-auto shrink-0">
+                  <span className="text-3xs text-muted-foreground/60 font-mono ml-auto shrink-0">
                     {(r.durationMs / 1000).toFixed(1)}s · {r.content?.length ?? 0} chars
                   </span>
                 )}
@@ -903,8 +903,8 @@ function CycleTimeline({
                     </Badge>
                   )}
                 </div>
-                <div className="text-2xs text-muted-foreground truncate">{r.desc}</div>
-                <div className="text-2xs font-mono text-muted-foreground/60 mt-0.5 flex items-center gap-1.5 flex-wrap">
+                <div className="text-3xs text-muted-foreground truncate">{r.desc}</div>
+                <div className="text-3xs font-mono text-muted-foreground/60 mt-0.5 flex items-center gap-1.5 flex-wrap">
                   {r.completed ? (
                     <>
                       <span className="flex items-center gap-0.5"><Clock className="h-2 w-2" />{((r.durationMs || 0) / 1000).toFixed(1)}s</span>
@@ -1362,7 +1362,7 @@ export function SettingsRunPanel({
                 <Layers className="h-2.5 w-2.5 mr-1" /> 3 modules
               </Badge>
               {running.size > 0 && (
-                <Badge variant="outline" className="ml-1 text-xs font-normal bg-sky-500/10 text-sky-600 dark:text-sky-300 border-sky-500/30 gap-1">
+                <Badge variant="outline" className="ml-1 text-3xs font-normal bg-sky-500/10 text-sky-600 dark:text-sky-300 border-sky-500/30 gap-0.5">
                   <Loader2 className="h-2.5 w-2.5 animate-spin" /> {running.size} running
                 </Badge>
               )}
@@ -1427,7 +1427,7 @@ export function SettingsRunPanel({
                 }`}
                 title="让服务器按 CLI → SDK 顺序自动选择"
               >
-                <Sparkles className="h-2.5 w-2.5" />
+                <Sparkles className="h-2 w-2" />
                 <span>auto</span>
               </button>
               {llmInfo.available.map((a, i) => {
@@ -1560,25 +1560,25 @@ export function SettingsRunPanel({
                 <Database className="h-3.5 w-3.5 text-muted-foreground" />
                 <span className="text-sm font-medium text-foreground">数据库</span>
                 {dbStatus?.isTest ? (
-                  <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-amber-500/40 text-amber-600 bg-amber-500/10 gap-0.5 ml-1">
-                    <AlertTriangle className="h-2.5 w-2.5" /> 测试库
+                  <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-amber-500/40 text-amber-600 bg-amber-500/10 gap-0.5 ml-1">
+                    <AlertTriangle className="h-2 w-2" /> 测试库
                   </Badge>
                 ) : dbStatus?.confirmed ? (
-                  <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/40 text-emerald-600 bg-emerald-500/10 gap-0.5 ml-1">
-                    <ShieldCheck className="h-2.5 w-2.5" /> 已确认
+                  <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-emerald-500/40 text-emerald-600 bg-emerald-500/10 gap-0.5 ml-1">
+                    <ShieldCheck className="h-2 w-2" /> 已确认
                   </Badge>
                 ) : null}
               </div>
-              <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 gap-0.5">
-                <Zap className="h-2.5 w-2.5" /> 即时生效
+              <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 gap-0.5">
+                <Zap className="h-2 w-2" /> 即时生效
               </Badge>
             </div>
 
             {/* Active path read-only display — this is what the 3 modules actually read/write */}
             {dbStatus && (
               <div className="mb-2 rounded-md bg-muted/40 border border-border/40 px-2.5 py-1.5">
-                <div className="flex items-center gap-1.5 text-[10px] text-muted-foreground mb-0.5">
-                  <HardDrive className="h-2.5 w-2.5" />
+                <div className="flex items-center gap-1.5 text-3xs text-muted-foreground mb-0.5">
+                  <HardDrive className="h-2 w-2" />
                   <span>当前活动路径（三大模块与运行中心共用）</span>
                 </div>
                 <div className="text-[11px] font-mono text-foreground break-all">
@@ -1586,26 +1586,26 @@ export function SettingsRunPanel({
                 </div>
                 <div className="flex flex-wrap gap-1 mt-1.5">
                   {dbStatus.hasSchema ? (
-                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 gap-0.5">
-                      <CheckCircle2 className="h-2.5 w-2.5" /> 表结构 {dbStatus.tableCount}
+                    <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-emerald-500/30 text-emerald-600 bg-emerald-500/10 gap-0.5">
+                      <CheckCircle2 className="h-2 w-2" /> 表结构 {dbStatus.tableCount}
                     </Badge>
                   ) : (
-                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 border-rose-500/30 text-rose-600 bg-rose-500/10 gap-0.5">
-                      <XCircle className="h-2.5 w-2.5" /> 未初始化
+                    <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 border-rose-500/30 text-rose-600 bg-rose-500/10 gap-0.5">
+                      <XCircle className="h-2 w-2" /> 未初始化
                     </Badge>
                   )}
                   {dbStatus.hasSchema && (dbStatus.counts?.PdbStructure || 0) > 0 && (
-                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 gap-0.5">
+                    <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 gap-0.5">
                       PDB {dbStatus.counts?.PdbStructure}
                     </Badge>
                   )}
                   {dbStatus.hasSchema && (dbStatus.counts?.Evaluation || 0) > 0 && (
-                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 gap-0.5">
+                    <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 gap-0.5">
                       评估 {dbStatus.counts?.Evaluation}
                     </Badge>
                   )}
                   {dbStatus.hasSchema && (dbStatus.counts?.PubMedArticle || 0) > 0 && (
-                    <Badge variant="outline" className="text-2xs px-1 py-0 h-4 gap-0.5">
+                    <Badge variant="outline" className="text-3xs px-1 py-0 h-3.5.5 gap-0.5">
                       论文 {dbStatus.counts?.PubMedArticle}
                     </Badge>
                   )}
@@ -1627,7 +1627,7 @@ export function SettingsRunPanel({
                 onClick={saveDbPath}
                 disabled={dbPathSaving}
               >
-                {dbPathSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                {dbPathSaving ? <Loader2 className="h-2.5 w-2.5 animate-spin" /> : <Save className="h-3 w-3" />}
                 <span className="ml-1">切换</span>
               </Button>
               <Button
@@ -1667,7 +1667,7 @@ export function SettingsRunPanel({
             )}
 
             {dbStatus?.isTest && (
-              <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-[10px] text-amber-700 dark:text-amber-300 leading-relaxed">
+              <div className="mt-2 rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5 text-3xs text-amber-700 dark:text-amber-300 leading-relaxed">
                 <AlertTriangle className="h-2.5 w-2.5 inline mr-1" />
                 当前使用的是测试数据库（<code className="font-mono">db/custom.db</code>），仅用于功能验证。建议点击「新建数据库」创建正式数据库以保存您的工作数据。
               </div>
@@ -1882,7 +1882,7 @@ export function SettingsRunPanel({
                     写入 LLM-Wiki 文件
                   </label>
                   {evalGenerateReport && (
-                    <Badge variant="outline" className="text-xs font-normal text-muted-foreground border-border/60 gap-1">
+                    <Badge variant="outline" className="text-3xs font-normal text-muted-foreground border-border/60 gap-0.5">
                       <Zap className="h-2.5 w-2.5 text-amber-500" />
                       默认原子任务 (评估 + 报告 ~50s)
                     </Badge>
@@ -1991,7 +1991,7 @@ export function SettingsRunPanel({
                     <div className="flex items-center gap-2">
                       <Activity className="h-3.5 w-3.5 text-muted-foreground" />
                       <span className="text-xs font-semibold">执行日志</span>
-                      <Badge variant="outline" className="text-xs font-normal text-muted-foreground border-border/60">
+                      <Badge variant="outline" className="text-3xs font-normal text-muted-foreground border-border/60">
                         {logFilter === 'all' ? logs.length : logs.filter(l => l.module === logFilter).length}
                       </Badge>
                     </div>
@@ -2059,7 +2059,7 @@ export function SettingsRunPanel({
                               }}
                             >
                               <div className="flex items-center gap-1.5">
-                                {l.status === 'success' && <CheckCircle2 className="h-3 w-3 text-emerald-500 shrink-0" />}
+                                {l.status === 'success' && <CheckCircle2 className="h-2.5 w-2.5 text-emerald-500 shrink-0" />}
                                 {l.status === 'error' && <XCircle className="h-3 w-3 text-rose-500 shrink-0" />}
                                 {l.status === 'running' && <Loader2 className="h-3 w-3 animate-spin text-sky-500 shrink-0" />}
                                 <span className="text-muted-foreground font-mono text-xs shrink-0">{l.ts.slice(11, 19)}</span>
